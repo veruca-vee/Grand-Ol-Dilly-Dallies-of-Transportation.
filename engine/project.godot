@@ -1,14 +1,18 @@
-; Felony City — Gate 0 Greybox
-; Engine: Godot 4.3. Input is read by physical key/mouse in scripts for
-; Gate 0; a full InputMap (touch / keyboard / mouse-only modes, as in
-; the HTML v2) is a Gate 1 task, noted in README.md.
+; G.O.D.O.T — Grand Ol' Dilly-Dallies Of Transportation
+; Engine: Godot 4.3. Main scene is Gate 3D-0 (the PS2-era 3D build,
+; the project's target since the 2026-10-29 pivot). The 2D Gate 0
+; systems prototype is still runnable by explicit path:
+;   godot --path . res://Main.tscn
+; Input is read by physical key/mouse in scripts; a full InputMap
+; (touch / keyboard / mouse-only modes, as in the HTML v2) is a
+; later gate, noted in README.md.
 
 config_version=5
 
 [application]
 
-config/name="Felony City - Gate 0 Greybox"
-run/main_scene="res://Main.tscn"
+config/name="G.O.D.O.T - Grand Ol Dilly-Dallies Of Transportation"
+run/main_scene="res://gate3d/Gate3D.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 
 [display]

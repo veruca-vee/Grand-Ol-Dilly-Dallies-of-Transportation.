@@ -5,6 +5,7 @@ engine/.godot/
 
 # Builds / exports
 build/
+builds/
 exports/
 
 # OS / editor junk
