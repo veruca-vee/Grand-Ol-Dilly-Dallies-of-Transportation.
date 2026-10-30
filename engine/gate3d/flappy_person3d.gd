@@ -81,6 +81,10 @@ func _build_body() -> void:
 		upper_pivot.add_child(eye)
 
 func _ready() -> void:
+	# Gate 3D-1 collision scheme: world/buildings = layer 1,
+	# characters = layer 2, cars = layer 4; everyone collides with all.
+	collision_layer = 2
+	collision_mask = 7
 	_build_body()
 
 func tick_flap(delta: float) -> void:

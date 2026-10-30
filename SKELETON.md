@@ -80,6 +80,41 @@ and an actual simulator"
   exactly, so they are not this project's code.
 - The 3D visuals / flap readability are [unverified] — headless has
   no pixels; Vee running it windowed is the check.
+- **VISUALLY VERIFIED BY VEE, 2026-10-30** (her words, from running
+  the exported Linux build on iwantitnow): "it works and they talk
+  and the car drives and the people are there and theyre southpark
+  canadian cube heads." Linux build: single-file GODOT.x86_64
+  export, hash-verified on both ends of the SSH transfer
+  (e61e1285…f545), lives at ~/GODOT-Linux/ on her laptop and as a
+  zip attached in this chat. Gate 3D-0 is DONE on every surface:
+  headless logic + real screen + real hardware.
+
+## Gate 3D-1 status (2026-10-30, built + verified headless)
+
+- Gate 3D-0's scene, extended in `engine/gate3d/`: all 9 weapons
+  (camera-ray hitscan + tracer/flash, ROCKET as an explosive
+  projectile, drive-by with the in-car cooldown ticking — HTML bug
+  fix #2), the wanted system (float + floor lookups — fix #1; caps
+  [0,3,6,10,15,22,30]; cop/SWAT/military flap-heads, tank as an
+  armoured box vehicle), and the cash/combo economy (data payouts ×
+  combo multiplier, 120-frame window, 30% pickup gate: cash gold
+  +$15 / health green +30 / weapon white). Player HP, damage,
+  BUSTED → fresh run. HUD: HP bar, weapon, cash/score, stars,
+  combo. All numbers from `data/*.json`; rules mirror the 2D
+  `engine/scripts/main.gd`. 3D adaptations (distance ÷15, speed
+  ratio 5.0/3.8, weapon pickups new) labelled in
+  `engine/gate3d/README.md`.
+- Verified on this VM, Godot 4.3 headless: import clean; main scene
+  1200 frames, **zero script errors** (153 "Parameter m is null"
+  dummy-renderer artifact lines, same as Gate 3D-0); scripted
+  `--autotest` prints AUTOTEST PASS (SMG ped kill pays exactly
+  $10/+20 score, cop damage+kill, wanted 1.4 → 1 star/cap 3, forced
+  spawns stop at cap, spawn types SWAT@3/tank@6, drive-by cooldown
+  ticks in-car). Linux export (66,162,048-byte single file, zip
+  `builds/GODOT-Linux-Gate3D1.zip` 24,156,352 bytes) ran 300 frames
+  clean and PASSES the autotest inside the export.
+- Gate 3D-1 visuals / game feel are [unverified] — only Vee running
+  the new build windowed on iwantitnow can judge them.
 
 ## Gate 0 status (2026-10-29, verified)
 

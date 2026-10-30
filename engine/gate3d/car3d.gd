@@ -3,6 +3,8 @@ extends CharacterBody3D
 
 # Arcade car, PS2-era proportions built from boxes + cylinder wheels.
 # Driven only while `driven` (set by gate3d_main on enter/exit).
+# Gate 3D-1: cars have hp (data: car.hp = 100) and can be destroyed;
+# destruction, economy and wanted live in gate3d_main.kill_car.
 
 var car_color: Color = Color(0.75, 0.25, 0.25)
 var speed: float = 0.0
@@ -10,6 +12,12 @@ var max_speed: float = 24.0
 var accel: float = 14.0
 var driven: bool = false
 var gravity: float = 22.0
+
+var hp: float = 100.0  # data: car.hp
+var max_hp: float = 100.0
+var dead: bool = false
+var main: Node = null
+var body_meshes: Array = []
 
 func _mat(color: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -29,14 +37,16 @@ func _box(size: Vector3, pos: Vector3, color: Color) -> MeshInstance3D:
 
 func _ready() -> void:
 	add_to_group("cars3d")
+	collision_layer = 4
+	collision_mask = 7
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(1.8, 1.1, 4.0)
 	shape.shape = box
 	shape.position = Vector3(0, 0.6, 0)
 	add_child(shape)
-	_box(Vector3(1.8, 0.5, 4.0), Vector3(0, 0.55, 0), car_color)
-	_box(Vector3(1.6, 0.5, 2.0), Vector3(0, 1.05, 0.15), car_color.darkened(0.15))
+	body_meshes.append(_box(Vector3(1.8, 0.5, 4.0), Vector3(0, 0.55, 0), car_color))
+	body_meshes.append(_box(Vector3(1.6, 0.5, 2.0), Vector3(0, 1.05, 0.15), car_color.darkened(0.15)))
 	_box(Vector3(1.62, 0.3, 0.9), Vector3(0, 1.05, -0.35), Color(0.1, 0.12, 0.16))  # windshield block
 	for sx in [-1.0, 1.0]:
 		for sz in [-1.0, 1.0]:
@@ -55,12 +65,23 @@ func _ready() -> void:
 	_box(Vector3(0.3, 0.12, 0.05), Vector3(-0.6, 0.62, -2.0), Color(1, 0.95, 0.7))
 	_box(Vector3(0.3, 0.12, 0.05), Vector3(0.6, 0.62, -2.0), Color(1, 0.95, 0.7))
 
+func take_damage(amt: float) -> void:
+	if dead:
+		return
+	hp -= amt
+	if hp <= 0.0 and main != null:
+		main.kill_car(self)
+
+func set_dead_visual() -> void:
+	for m in body_meshes:
+		m.material_override = _mat(Color(0.1, 0.1, 0.1))
+
 func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 	else:
 		velocity.y = -0.5
-	if driven:
+	if driven and not dead:
 		var throttle := 0.0
 		var steer := 0.0
 		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
