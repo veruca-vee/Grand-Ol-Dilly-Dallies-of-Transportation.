@@ -1,0 +1,23 @@
+; Felony City — Gate 0 Greybox
+; Engine: Godot 4.3. Input is read by physical key/mouse in scripts for
+; Gate 0; a full InputMap (touch / keyboard / mouse-only modes, as in
+; the HTML v2) is a Gate 1 task, noted in README.md.
+
+config_version=5
+
+[application]
+
+config/name="Felony City - Gate 0 Greybox"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

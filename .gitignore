@@ -1,0 +1,13 @@
+# Godot generated
+.godot/
+engine/.godot/
+*.import
+
+# Builds / exports
+build/
+exports/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.tmp
