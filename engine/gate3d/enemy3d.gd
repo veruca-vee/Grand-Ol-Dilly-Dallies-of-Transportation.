@@ -32,6 +32,14 @@ func setup(kind_: String, stats: Dictionary) -> void:
 	range_ = float(stats.get("range", 350)) / 15.0
 	bullet_life_frames = float(stats.get("range", 350)) / 18.0
 	shirt_color = Color(stats.get("color", "#4488ff"))
+	# Gate 3D-2 dressing: cops and military wear caps (see
+	# flappy_person3d); SWAT's near-black kit reads as-is.
+	if kind == "cop":
+		cap_enabled = true
+		cap_color = Color(0.08, 0.12, 0.32)
+	elif kind == "military":
+		cap_enabled = true
+		cap_color = Color(0.22, 0.32, 0.16)
 
 func _ready() -> void:
 	super._ready()

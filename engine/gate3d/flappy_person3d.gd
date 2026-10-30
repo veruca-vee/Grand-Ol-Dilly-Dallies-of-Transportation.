@@ -19,6 +19,11 @@ const MOUTH_Y := 1.47
 var shirt_color: Color = Color(0.25, 0.45, 0.8)
 var pants_color: Color = Color(0.2, 0.2, 0.25)
 var skin_color: Color = Color(0.96, 0.80, 0.64)
+# Gate 3D-2 dressing: an optional cap that rides the upper head (it
+# is glued to the top half, so it flaps with the flap — correct and
+# funny). Head proportions and the hinge are NOT touched.
+var cap_enabled: bool = false
+var cap_color: Color = Color(0.10, 0.14, 0.35)
 
 var is_talking: bool = false
 var flap_time: float = 0.0
@@ -67,6 +72,10 @@ func _build_body() -> void:
 	upper_pivot.position = Vector3(0, MOUTH_Y, 0.19)
 	add_child(upper_pivot)
 	_box(Vector3(0.44, 0.22, 0.40), Vector3(0, 0.11, -0.19), skin_color, upper_pivot)
+	if cap_enabled:
+		# cap crown + brim, children of the upper head so they ride it
+		_box(Vector3(0.47, 0.09, 0.43), Vector3(0, 0.265, -0.19), cap_color, upper_pivot)
+		_box(Vector3(0.42, 0.03, 0.20), Vector3(0, 0.225, -0.47), cap_color.darkened(0.15), upper_pivot)
 	# beady eyes: small, close-set, black — children of the upper head
 	for sx in [-1.0, 1.0]:
 		var eye := MeshInstance3D.new()

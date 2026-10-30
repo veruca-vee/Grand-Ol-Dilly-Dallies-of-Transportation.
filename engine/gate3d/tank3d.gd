@@ -55,12 +55,29 @@ func _ready() -> void:
 	shape.shape = box
 	shape.position = Vector3(0, 0.9, 0)
 	add_child(shape)
-	var armor := Color(0.45, 0.47, 0.45)
+	# Gate 3D-2 dressing: olive armour, side skirts over the tracks,
+	# turret hatch, rear storage boxes and a whip antenna.
+	var armor := Color(0.32, 0.35, 0.22)
 	_box(Vector3(3.2, 1.1, 5.2), Vector3(0, 0.75, 0), armor)
-	_box(Vector3(1.6, 0.7, 2.2), Vector3(0, 1.65, 0.2), armor.darkened(0.15))
-	_box(Vector3(0.25, 0.25, 2.4), Vector3(0, 1.65, -1.9), Color(0.15, 0.15, 0.15))
+	_box(Vector3(3.3, 0.35, 5.3), Vector3(0, 1.32, 0), armor.lightened(0.08))  # deck plate
+	_box(Vector3(1.6, 0.7, 2.2), Vector3(0, 1.65, 0.2), armor.darkened(0.15))  # turret
+	_box(Vector3(0.25, 0.25, 2.4), Vector3(0, 1.65, -1.9), Color(0.15, 0.15, 0.15))  # barrel
+	_box(Vector3(0.7, 0.18, 0.7), Vector3(0.3, 2.08, 0.4), armor.darkened(0.25))  # hatch
+	_box(Vector3(0.9, 0.5, 0.5), Vector3(-0.9, 1.05, 2.45), armor.darkened(0.2))  # storage boxes
+	_box(Vector3(0.9, 0.5, 0.5), Vector3(0.9, 1.05, 2.45), armor.darkened(0.2))
+	var antenna := MeshInstance3D.new()
+	var am := CylinderMesh.new()
+	am.top_radius = 0.015
+	am.bottom_radius = 0.03
+	am.height = 1.8
+	am.radial_segments = 5
+	antenna.mesh = am
+	antenna.position = Vector3(-0.7, 2.9, 0.9)
+	antenna.material_override = _mat(Color(0.10, 0.10, 0.10))
+	add_child(antenna)
 	for sx in [-1.0, 1.0]:
-		_box(Vector3(0.5, 0.7, 5.3), Vector3(sx * 1.5, 0.35, 0), Color(0.1, 0.1, 0.1))
+		_box(Vector3(0.5, 0.7, 5.3), Vector3(sx * 1.5, 0.35, 0), Color(0.1, 0.1, 0.1))  # tracks
+		_box(Vector3(0.56, 0.45, 5.35), Vector3(sx * 1.5, 0.95, 0), armor.darkened(0.10))  # skirts
 
 func gun_position() -> Vector3:
 	return global_position + Vector3(0, 1.65, 0) + (-global_transform.basis.z) * 3.0

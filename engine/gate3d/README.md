@@ -1,4 +1,4 @@
-# Gate 3D — PS2-era greybox
+# Gate 3D — PS2-era city (was: greybox)
 
 Run it (from the `engine/` folder):
 
@@ -8,16 +8,16 @@ godot --path . res://gate3d/Gate3D.tscn
 
 **Controls:** WASD move / drive · mouse aims (camera-centre ray) ·
 **LMB** fire · **1–9** select weapon, **Q** cycles · **E** enter/exit
-car · hold **T** to talk and watch the head flap. Peds talk to
-themselves at random — same flap. Fleeing peds and firing characters
-flap too.
+car · **B** Black Market upgrades · hold **T** to talk and watch
+the head flap. Peds talk to themselves at random — same flap.
+Fleeing peds and firing characters flap too.
 
 ## The PS2 brief, as built here
 
-- Primitives only: box buildings, box-and-cylinder cars, box people
+- Low-poly everything, all of it generated in code (Gate 3D-2)
 - Camera far plane 160 + exponential fog (density 0.012) — the draw
   distance *is* the period look, like San Andreas at launch
-- Flat colours, one directional light, no textures yet
+- One directional light + procedural sky, hazy horizon
 - Seeded city: 5×5 blocks, seed 2004, road pitch 52
 
 ## The Canadian look in 3D
@@ -130,3 +130,127 @@ forced a change from the 2D numbers, this is what was done:
   Zipped as `builds/GODOT-Linux-Gate3D1.zip` (24,156,352 bytes).
 - Gate 3D-1 visuals/game feel are **[unverified]** — headless has no
   pixels; Vee running the new build windowed is the check.
+
+## Gate 3D-2 — decked out (2026-10-30)
+
+Vee's brief: "build out everything we need, deck out this
+scaffolding and replace the grey boxes." Two hard constraints shaped
+it: the Canadian cube flap-heads stay exactly as they are (her
+stipulation), and **no binary assets** — the repo's GitHub push
+route accepts UTF-8 text only, so .glb/.fbx packs can't live in the
+repo. Everything visual is therefore **procedural**: meshes,
+materials and textures generated in GDScript at startup
+(`dressing.gd`), licence-clean and reproducible from seed 2004.
+
+### City dressing
+
+- **Buildings**: 1–3 per grid cluster (~48), varied footprints
+  (12–20) and heights (6–28). Facades use code-generated window-grid
+  textures (6 variants of muted PS2 brick/tan/slate; ~28% of windows
+  lit warm) with per-building UV scale so windows stay one size.
+  Roof slab parapet, dark storefront band + coloured awning on most,
+  concrete pavement pad under each cluster (the pad edge is the
+  curb). Rooftop props: AC units and antennas (MultiMesh), a few
+  water towers (legs + cylinder tank + cone roof).
+- **Roads**: asphalt noise texture, dashed centre lines down every
+  road (one MultiMesh, ~390 instances), zebra crosswalks at the
+  centre intersection — the only one not built over by clusters in
+  this layout, as in 3D-0/1. Ground slab is noise-textured concrete.
+- **Props, mostly MultiMesh** (622 instances across ~13 draw calls):
+  streetlights with emissive lamp heads along the roads, traffic
+  lights at the inner 3×3 intersections (red/green lenses by parity),
+  low-poly trees on cluster corners, crates and barriers scattered
+  on the pads; dumpsters and bus-stop benches as individual nodes.
+  Props have no collision (labelled: only buildings/ground do, as
+  before — driving through a lamp post is possible and unpenalised).
+- **Sky/lighting**: ProceduralSkyMaterial (hazy blue → warm smog
+  horizon), ambient from the sky, same sun, same fog 0.012 / far 160.
+- **Cars**: dressed bodies — paint lower body + trim, glass cabin,
+  paint roof, bumpers, hubcaps; front wheels visibly steer, all
+  wheels roll; headlights/taillights are emissive (no real light
+  sources — perf on the Celeron). Two extra paint colours (silver,
+  purple) and two extra parked cars. The tank got olive armour,
+  skirts, deck plate, hatch, storage boxes and an antenna.
+- **Characters**: heads and the flap hinge are UNTOUCHED. Bodies got
+  more shirt/pants variety; cops and military wear caps that ride
+  the upper head (glued to the top half, so they flap too).
+
+### Scaffolding / systems completion
+
+- **Black Market (B)**: the 5 upgrades from `data/upgrades.json` —
+  Body Armor (hp +25/lvl), Sprint Training (speed +0.4/lvl), Gun
+  Mods (damage ×(1+0.15/lvl)), Trigger Job (fire rate
+  ×(1+0.10/lvl)), Adrenaline (regen). Cost is exactly the data
+  formula `floor(base_cost × 1.4^level)` — note floor() of the
+  floating-point product, so level-1 Body Armor is $210 and level-2
+  is $293, not $294 (same arithmetic the HTML's JS did). The panel
+  pauses the game; buy with the buttons or keys 1–5. Effects are
+  live: max HP, walk speed (2D increment scaled by the usual
+  5.0/3.8), weapon damage (incl. drive-by and rockets), cooldowns.
+  Regen follows the data file's rule as written: only while
+  wanted == 0, +(0.3 × level) × 0.05 hp per physics frame.
+- **Save/load** (`user://godot_save.json`). **The rule: cash, total
+  score, upgrade levels and the unlocked-weapon set are the
+  persistent profile.** BUSTED still resets the run (wanted,
+  enemies, position) via scene reload, but the profile carries
+  over. Autosaves on purchase, every 1800 physics frames (30 s),
+  and on BUSTED. (Gate 3D-1 made all 9 weapons available from the
+  start; the save persists that available set as `unlocked_weapons`
+  and weapon pickups still record into it.)
+- **Sound, synthesized** (`sfx.gd`): gunshot noise burst, explosion
+  rumble, pickup chime, hurt thud, BUSTED sting — generated
+  AudioStreamWAV (22050 Hz 16-bit), pooled players, modest volumes,
+  throttled so chain kills don't stack booms. **Cut, explicitly:
+  the car-engine hum.** A looped synthesized hum sounds like a
+  fridge within seconds; not worth it. Maybe a real sample pack
+  someday, licence permitting.
+- **Minimap** (`minimap.gd`): bottom-right, drawn in `_draw` from
+  world positions (no SubViewport) — block/road grid, car squares,
+  ember enemy dots (tanks bigger), gold player dot.
+- Debug helpers: `--countnodes` prints scene node + MultiMesh
+  instance counts; `--screenshot` (windowed only) saves a frame to
+  `user://gate3d_shot.png` and quits — used for the Xvfb visual
+  check below. The autotest uses its own save path
+  (`user://godot_save_autotest.json`) and deletes it afterwards, so
+  testing never touches the real profile.
+
+### Verification (2026-10-30, this VM, Godot 4.3)
+
+- Import clean (two fixes on the way: GDScript `:=` can't infer
+  from Variant values — the Gate 3D-1 lesson again — and this
+  build's GDScript doesn't expose `TEXTURE_REPEAT_ENABLED` by name;
+  empirically, code-generated textures tile with `uv1_scale` by
+  default here, proven with a rendered red/green checker under
+  Xvfb before relying on it).
+- Main scene, 1200 frames headless: exit 0, **zero script errors,
+  zero parse errors**, zero other ERROR lines; 401 `Parameter "m"
+  is null` lines — the known dummy-renderer artifact, count up from
+  153 only because there are more meshes now; not chased.
+- **Autotest** (project AND exported binary, identical output):
+  `AUTOTEST PASS: smg_ped_kill cash+score+combo | smg_cop_damage+kill
+  | wanted_floor caps spawn_types | driveby_cooldown_ticks` and the
+  new `AUTOTEST PASS: upgrade_purchase cost_scaling effects |
+  save_load_roundtrip` (hp cost 150 → 210 across a purchase, max HP
+  100 → 125, damage ×1.15, fire rate ×1.10, broke purchase refused,
+  save → scramble → load restores cash/score/levels/unlocks).
+- Black Market panel exercised live under Xvfb: opens visible +
+  tree paused, button purchase applies (cash 500 → 350, max HP
+  125), closes unpaused.
+- Visual check under Xvfb (llvmpipe): the dressed city renders —
+  facades with lit windows, crosswalks, traffic light, trees,
+  dressed red car, minimap with live dots. One fix from that check:
+  crosswalk stripes thinned from 0.10 to 0.03 (they read as slabs,
+  now they read as paint).
+- **Perf sanity**: 714 nodes total in the dressed scene; 622 prop
+  instances ride ~13 MultiMesh draw calls instead of ~600 nodes.
+  Buildings are ~48 static bodies as before in kind. No per-frame
+  allocations added beyond the minimap's redraw. Should hold up on
+  the UHD 600 / N4000; real-hardware feel is Vee's check.
+- Linux export: `builds/GODOT-Linux/GODOT.x86_64`, 66,192,368
+  bytes, sha256 `27e4212013ae3d2114d1a60ce035e66f6b052d4844dea47b6ed571fb5d36fe53`;
+  exported binary ran 300 frames headless, zero script errors, and
+  PASSES both autotest lines. Zipped as
+  `builds/GODOT-Linux-Gate3D2.zip` (24,282,126 bytes).
+- Gate 3D-2 visuals/game feel on real hardware are **[unverified]**
+  — the Xvfb frame is software-rendered; Vee running the build on
+  iwantitnow is the check, as always.

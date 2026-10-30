@@ -20,7 +20,8 @@ var death_timer: float = -1.0
 var main: Node = null
 
 func _init() -> void:
-	shirt_color = [Color(0.8, 0.3, 0.6), Color(0.4, 0.5, 0.8), Color(0.8, 0.6, 0.3), Color(0.4, 0.8, 0.8)][randi() % 4]
+	shirt_color = [Color(0.8, 0.3, 0.6), Color(0.4, 0.5, 0.8), Color(0.8, 0.6, 0.3), Color(0.4, 0.8, 0.8), Color(0.55, 0.35, 0.65), Color(0.7, 0.45, 0.3)][randi() % 6]
+	pants_color = [Color(0.16, 0.18, 0.30), Color(0.10, 0.10, 0.12), Color(0.30, 0.22, 0.16), Color(0.25, 0.25, 0.28), Color(0.35, 0.30, 0.22)][randi() % 5]
 
 func _ready() -> void:
 	super._ready()

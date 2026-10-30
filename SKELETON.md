@@ -116,6 +116,64 @@ and an actual simulator"
 - Gate 3D-1 visuals / game feel are [unverified] — only Vee running
   the new build windowed on iwantitnow can judge them.
 
+## Gate 3D-2 status (2026-10-30, built + verified headless; Xvfb visual check done)
+
+- Vee's go, verbatim: "work while i am gone build out everything we
+  need deck out this scaffolding and replace the grey boxes."
+- **Procedural dressing only** — hard constraint, recorded: the
+  GitHub snapshot push accepts UTF-8 text only, so binary model
+  files (.glb/.fbx) cannot be pushed; ALL visuals are generated in
+  GDScript (meshes, materials, code-made textures via Image /
+  ImageTexture). No asset packs downloaded. New: `gate3d/dressing.gd`.
+  Buildings: 1–3 per cluster with varied footprints/heights,
+  generated window-grid facades (some windows lit), roof parapets,
+  storefront band + awning, rooftop AC/antennas/water towers.
+  Roads: asphalt texture, pavement pads, dashed lane markings +
+  centre-intersection crosswalks (MultiMesh). Props via MultiMesh:
+  streetlights (emissive heads), traffic lights, trees, crates,
+  barriers; dumpsters + benches as nodes. Procedural sky + sky
+  ambient; fog 0.012 / far 160 unchanged.
+- **Cars dressed**: body + glass cabin + roof, bumpers, hubcaps,
+  front wheels steer / all wheels roll, emissive head/taillights,
+  wider paint palette (6 cars now). Tank: olive, turret + barrel
+  (existing) + skirts, hatch, antenna, storage boxes.
+- **Characters**: Canadian cube flap-heads EXACTLY as before (Vee's
+  stipulation — hinge + beady eyes untouched). Bodies dressed:
+  varied shirt/pants colours; cop + military caps riding the upper
+  head.
+- **Systems completed**: Black Market upgrades (all 5 from
+  `data/upgrades.json`, cost `floor(base × 1.4^level)`, B panel,
+  keys/buttons, effects live: max HP / speed / damage mult /
+  fire-rate mult / regen per the data's rule — wanted == 0 only);
+  save/load `user://godot_save.json` — **rule: cash, total score,
+  upgrade levels and unlocked weapons persist across BUSTED; only
+  the run (wanted/enemies/position) resets**; autosave on purchase,
+  every 1800 frames, on BUSTED. Synthesized SFX (`gate3d/sfx.gd`,
+  generated AudioStreamWAV: gunshot, explosion, pickup, hurt,
+  BUSTED sting) — **engine hum CUT explicitly** (looped synth hum =
+  fridge drone; recorded in the gate README). Minimap
+  (`gate3d/minimap.gd`, `_draw`, no SubViewport): grid + player +
+  enemy + car dots.
+- Verified on this VM, Godot 4.3 headless: import clean; main scene
+  1200 frames, **zero script errors** (401 "Parameter m is null"
+  dummy-renderer artifact lines — up from 153 because there are
+  more meshes; same known artifact). `--autotest` prints BOTH PASS
+  lines: the Gate 3D-1 line (unchanged) plus
+  `AUTOTEST PASS: upgrade_purchase cost_scaling effects |
+  save_load_roundtrip` (hp cost 150→210, max HP 100→125, damage
+  ×1.15, fire rate ×1.10, broke-buy refused, save/scramble/load
+  restores). Shop panel also exercised live under Xvfb (opens
+  paused, purchase applies, closes). Xvfb screenshot check: dressed
+  city renders (lit windows, crosswalks — thinned after the check —
+  traffic light, trees, minimap live). Perf: 714 nodes total, 622
+  prop instances in ~13 MultiMesh draw calls.
+- Linux export (66,192,368 bytes, sha256 27e42120…e53): 300 frames
+  clean, both autotest lines PASS inside the export. Zip
+  `builds/GODOT-Linux-Gate3D2.zip` (24,282,126 bytes).
+- Gate 3D-2 visuals / game feel on real hardware are [unverified] —
+  only Vee running the new build on iwantitnow can judge them
+  (Xvfb frame was software-rendered).
+
 ## Gate 0 status (2026-10-29, verified)
 
 - Built in `engine/` (Godot 4.3): main/city/player/car/ped/enemy/bullet/
