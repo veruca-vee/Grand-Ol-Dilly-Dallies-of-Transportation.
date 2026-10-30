@@ -19,6 +19,10 @@ var dead: bool = false
 var fire_flap_time: float = 0.0
 var main: Node = null
 var gun: MeshInstance3D = null
+# Autotest seam: when x is not NaN, this replaces the WASD key reads
+# (x = strafe D-A, y = forward W-S) so headless tests can "walk".
+# Normal play never sets it.
+var move_override := Vector2(NAN, NAN)
 
 func _init() -> void:
 	shirt_color = Color(0.1, 0.6, 0.15)  # set before _build_body runs
@@ -55,16 +59,32 @@ func _physics_process(delta: float) -> void:
 		return
 	if driving != null:
 		return  # main syncs our position to the car
-	var dir := Vector3.ZERO
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		dir.z -= 1
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		dir.z += 1
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		dir.x -= 1
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		dir.x += 1
-	dir = dir.normalized()
+	# Walk input as a 2D vector: x = strafe (D-A), y = forward (W-S).
+	var input_vec := Vector2.ZERO
+	if not is_nan(move_override.x):
+		input_vec = move_override
+	else:
+		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+			input_vec.y += 1
+		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+			input_vec.y -= 1
+		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+			input_vec.x -= 1
+		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+			input_vec.x += 1
+	# Movement is CAMERA-RELATIVE (Gate 3D-2 walk fix): W walks where
+	# the follow camera looks, not world-north. The camera math lives
+	# in gate3d_main: behind the actor is Vector3(sin(cam_yaw), 0,
+	# cos(cam_yaw)), so camera forward is its negation. At cam_yaw 0
+	# forward is (0,0,-1) and right is (1,0,0), matching the old axes.
+	var yaw := 0.0
+	if main != null:
+		var yv: Variant = main.get("cam_yaw")
+		if yv != null:
+			yaw = float(yv)
+	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
+	var right := fwd.cross(Vector3.UP)
+	var dir := (fwd * input_vec.y + right * input_vec.x).normalized()
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 	else:

@@ -254,3 +254,50 @@ materials and textures generated in GDScript at startup
 - Gate 3D-2 visuals/game feel on real hardware are **[unverified]**
   — the Xvfb frame is software-rendered; Vee running the build on
   iwantitnow is the check, as always.
+
+## Gate 3D-2 walk fix (2026-10-30, from Vee's playtest)
+
+**Report (Vee, playing Gate 3D-2 on iwantitnow):** "WASD works with
+steering in vehicle but it doesn't work for walking, it's annoying
+as hell to walk around."
+
+**Root cause:** `player3d.gd` built on-foot movement on WORLD axes
+(W = world −Z, A = world −X) and never read `cam_yaw`. The follow
+camera swings behind the actor and mouse aim fires along the camera
+ray, so on foot W always walked world-north whatever the camera was
+looking at, and the camera then rotated around behind the new
+heading. Driving steers relative to the car, so it felt right —
+the mismatch was the bug.
+
+**Fix:** movement is now camera-relative. Input is read as a 2D
+vector (x = strafe D−A, y = forward W−S), then
+`forward = Vector3(-sin(cam_yaw), 0, -cos(cam_yaw))` (the negation
+of the follow-cam's `back` vector in `gate3d_main.gd`),
+`right = forward.cross(Vector3.UP)` — at cam_yaw 0 that gives
+forward (0,0,−1), right (1,0,0), identical to the old axes — and
+`dir = (forward*y + right*x).normalized()`. `cam_yaw` is read from
+the player's `main` reference each physics frame, falling back to
+yaw 0 (= old world axes) if unavailable. Nothing else changed:
+driving input, firing facing (`rotation.y = cam_yaw`), gravity,
+walk speed and the Sprint Training multiplier path, flap/talk.
+
+**Test seam:** `Player3D.move_override` (Vector2, default
+`Vector2(NAN, NAN)` = unset). When set, it replaces the key reads
+so headless tests can walk. Normal play never sets it.
+
+**Verification (2026-10-30, this VM, Godot 4.3):** import clean;
+main scene 1200 frames headless, exit 0, zero script/parse errors
+(401 "Parameter m is null" artifact lines, counted, not chased).
+Autotest gained section 7 — camera yaw forced to −PI/2 (forward =
++X), 30 frames of `move_override` forward must displace along +X
+(dot > 0.8) and NOT along world −Z (dot < 0.3), plus a strafe-right
+check along camera right. New third line, project and exported
+binary identical, alongside the two existing lines verbatim:
+`AUTOTEST PASS: wasd_camera_relative`. Linux export:
+`builds/GODOT-Linux/GODOT.x86_64`, 66,193,968 bytes, sha256
+`b43e6d144a8225b60b605b02e1ad5c9c79f7944c6c15f103a79befe7d4e0e0de`;
+exported binary ran 300 frames headless with zero script errors
+and passes all three autotest lines. Zipped as
+`builds/GODOT-Linux-Gate3D2-walkfix.zip` (24,283,771 bytes).
+Walking FEEL on real hardware is **[unverified]** — Vee walking it
+on iwantitnow is the check, as always.

@@ -170,9 +170,25 @@ and an actual simulator"
 - Linux export (66,192,368 bytes, sha256 27e42120…e53): 300 frames
   clean, both autotest lines PASS inside the export. Zip
   `builds/GODOT-Linux-Gate3D2.zip` (24,282,126 bytes).
-- Gate 3D-2 visuals / game feel on real hardware are [unverified] —
-  only Vee running the new build on iwantitnow can judge them
-  (Xvfb frame was software-rendered).
+- **VISUALLY VERIFIED BY VEE, 2026-10-30**: she uploaded two
+  screenshots from live play on iwantitnow — dressed street view
+  (facades, lit windows, minimap live, HUD $125 / Score 160, MINIGUN
+  equipped) and the BLACK MARKET panel open with all 5 upgrades at
+  data prices. Gate 3D-2 is done on every surface.
+- **Gate 3D-2 walk fix (2026-10-30, from Vee's playtest report):**
+  she reported WASD steering fine in a car but broken for walking.
+  Root cause: `player3d.gd` moved on WORLD axes and ignored
+  `cam_yaw`, so W always walked world-north while the follow camera
+  swung around. Fix: on-foot movement is now camera-relative
+  (forward = `Vector3(-sin(cam_yaw), 0, -cos(cam_yaw))`, right =
+  forward × up; identical to the old axes at yaw 0), driving /
+  firing / speeds untouched. Autotest section 7 added via a
+  `move_override` seam on Player3D — new PASS line
+  `AUTOTEST PASS: wasd_camera_relative`, both prior lines still
+  verbatim, in project and exported binary; 1200 frames headless
+  zero script errors. New export 66,193,968 bytes, sha256
+  b43e6d14…e0de, zip `builds/GODOT-Linux-Gate3D2-walkfix.zip`.
+  Walking feel **[unverified]** until Vee walks it on iwantitnow.
 
 ## Gate 0 status (2026-10-29, verified)
 

@@ -1503,6 +1503,47 @@ func _run_autotest() -> void:
 	if FileAccess.file_exists(save_path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path))
 
+	# --- 7. WASD is camera-relative on foot (Gate 3D-2 walk fix) ---
+	# Camera yaw -PI/2 makes camera forward +X (world east), NOT the
+	# old world -Z. Walking "forward" must displace along +X, and
+	# strafing right must displace along camera right (+Z here).
+	var fails3: Array[String] = []
+	if player.driving != null:
+		_exit_car()
+	cam_yaw = -PI / 2.0
+	var expect_fwd := Vector3(-sin(cam_yaw), 0, -cos(cam_yaw))
+	var expect_right := expect_fwd.cross(Vector3.UP)
+	player.global_position = Vector3(0, 0.2, 8)  # open centre block
+	player.velocity = Vector3.ZERO
+	for i in range(3):
+		await get_tree().physics_frame
+	var walk_start := player.global_position
+	player.move_override = Vector2(0, 1)  # forward
+	for i in range(30):
+		await get_tree().physics_frame
+	player.move_override = Vector2(NAN, NAN)
+	var disp := player.global_position - walk_start
+	disp.y = 0.0
+	if disp.length() < 1.5:
+		fails3.append("walk forward: barely moved (%.2f units in 30 frames)" % disp.length())
+	else:
+		var dn := disp.normalized()
+		if dn.dot(expect_fwd) <= 0.8:
+			fails3.append("walk forward: displacement %s not along camera forward %s (dot %.2f)" % [str(dn), str(expect_fwd), dn.dot(expect_fwd)])
+		if dn.dot(Vector3(0, 0, -1)) >= 0.3:
+			fails3.append("walk forward: displacement %s still biased to world -Z (dot %.2f)" % [str(dn), dn.dot(Vector3(0, 0, -1))])
+	var strafe_start := player.global_position
+	player.move_override = Vector2(1, 0)  # strafe right
+	for i in range(30):
+		await get_tree().physics_frame
+	player.move_override = Vector2(NAN, NAN)
+	var sdisp := player.global_position - strafe_start
+	sdisp.y = 0.0
+	if sdisp.length() < 1.5:
+		fails3.append("strafe right: barely moved (%.2f units in 30 frames)" % sdisp.length())
+	elif sdisp.normalized().dot(expect_right) <= 0.8:
+		fails3.append("strafe right: displacement %s not along camera right %s (dot %.2f)" % [str(sdisp.normalized()), str(expect_right), sdisp.normalized().dot(expect_right)])
+
 	if fails.is_empty():
 		print("AUTOTEST PASS: smg_ped_kill cash+score+combo | smg_cop_damage+kill | wanted_floor caps spawn_types | driveby_cooldown_ticks")
 	else:
@@ -1513,4 +1554,9 @@ func _run_autotest() -> void:
 	else:
 		for f in fails2:
 			print("AUTOTEST FAIL: ", f)
-	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() else 1)
+	if fails3.is_empty():
+		print("AUTOTEST PASS: wasd_camera_relative")
+	else:
+		for f in fails3:
+			print("AUTOTEST FAIL: ", f)
+	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() else 1)
