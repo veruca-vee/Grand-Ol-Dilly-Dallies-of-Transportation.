@@ -19,6 +19,14 @@ not modern AAA.
 - `sim/SIMULATOR.md` + `engine/sim/simulator.gd` — headless balance
   simulator, runs on the same data files (verified passing)
 - `assets/pipeline/` — emoji → scaffold → generated image → saved asset
+- `assets/PREMADE.md` — checked pre-made asset shortlist (Kenney city
+  kits CC0 first), with the binary-push warning for model files
+- `engine/gate3d/` — **Gate 3D-0 (built 2026-10-29):** PS2-era 3D
+  greybox. Third-person, low-poly city blocks, fog + 160-unit draw
+  distance, one drivable car (+3 parked), wandering flap-head peds.
+  Verified headless on Godot 4.3: 600 frames, zero script errors.
+  Canadian look in 3D = upper head on a hinge at the mouth line,
+  beady eyes riding it (see `gate3d/README.md`)
 - `engine/` — Gate 0 greybox: a **top-down 2D systems prototype** in
   Godot 4.3 (movement, car stealing/driving, shooting, wanted, HUD),
   verified running 1200 frames headless with zero script errors.

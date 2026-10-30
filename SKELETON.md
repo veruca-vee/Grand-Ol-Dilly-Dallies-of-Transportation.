@@ -37,6 +37,13 @@ and an actual simulator"
   and filled with generated images, then saved. Continuity at asset
   creation via Gemini / apparently ChatGPT.
 
+- **Character look in 3D: YES (Vee, 2026-10-29):** "yes to the Canadian
+  look, how not sure." → slot filled: the look carries into 3D.
+  **How [assistant's design, not Vee's words]:** the head is two pieces
+  split at the mouth line. The upper head (with the beady eyes on it)
+  sits on a hinge pivot at the back of the jaw and rotates open/closed
+  around that hinge while talking — the 2D flap, as a 3D hinge.
+  Implemented in Gate 3D-0 (`engine/gate3d/flappy_person3d.gd`).
 - **Character look (Gate 0 stipulation, Vee 2026-10-29):** "The characters
   must look similar to the way the Canadians look in South Park."
   [design translation, labelled: simple flat bodies, beady close-set eyes,
@@ -58,6 +65,21 @@ and an actual simulator"
 - **Player character:** ______ (HTML is an unnamed green circle)
 - **Platform target:** ______ (HTML ran mobile + desktop; engine export
   target not yet stated)
+
+## Gate 3D-0 status (2026-10-29, verified)
+
+- Built in `engine/gate3d/`: third-person 3D city (5x5 seeded blocks,
+  seed 2004), roads, fog density 0.012, camera far 160, player + 8
+  peds (all flap-heads), 4 box cars, E to enter/drive/exit.
+- Verified headless, Godot 4.3: 600 frames, **zero script errors**.
+  Two catches from verification, both handled: (1) pre-tree
+  `global_position` sets on Node3D error and are dropped — switched
+  to local `position`, errors went to zero; (2) 152 "mesh is null"
+  errors in the log are a headless dummy-renderer artifact — a probe
+  project with a single BoxMesh and nothing else reproduces them
+  exactly, so they are not this project's code.
+- The 3D visuals / flap readability are [unverified] — headless has
+  no pixels; Vee running it windowed is the check.
 
 ## Gate 0 status (2026-10-29, verified)
 
