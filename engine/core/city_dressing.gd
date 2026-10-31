@@ -62,6 +62,7 @@ var lamp_head_mesh: BoxMesh     # offset baked via instance transform
 var traffic_mesh: ArrayMesh     # pole + signal box, offsets baked in
 var lens_mesh: SphereMesh
 var crosswalk_mesh: ArrayMesh   # one intersection's 4 zebra sets
+var crosswalk_stripes: Array = []  # [centre, size] per stripe baked into crosswalk_mesh (CityBuilder reads the centres)
 var bollard_mesh: CylinderMesh
 var cone_mesh: CylinderMesh
 var trashbag_mesh: SphereMesh
@@ -252,15 +253,21 @@ func _build_meshes() -> void:
 	lens_mesh.rings = 4
 	# crosswalks: zebra stripes across all 4 approaches of one
 	# intersection centred at the origin (stripes stop at the road edge)
-	var parts: Array = []
+	crosswalk_stripes.clear()
 	for side in [-1.0, 1.0]:
 		for i in range(5):
 			var off := -4.0 + i * 2.0
+			# Detail 1 markings fix: stripe centre y 0.132 puts the
+			# slab (0.03 thick) just proud of the raised asphalt top
+			# (0.115) — paint ON the road. (Pre-fix y 0.105 painted
+			# the intersection PAD, whose top was 0.10.)
 			# across the vertical road, north + south approaches
-			# (thin slabs, 0.02 proud of the intersection pad = paint)
-			parts.append([unit_box, _t(Vector3(off, 0.105, side * 7.6), Vector3(1.1, 0.03, 2.8))])
+			crosswalk_stripes.append([Vector3(off, 0.132, side * 7.6), Vector3(1.1, 0.03, 2.8)])
 			# across the horizontal road, east + west approaches
-			parts.append([unit_box, _t(Vector3(side * 7.6, 0.105, off), Vector3(2.8, 0.03, 1.1))])
+			crosswalk_stripes.append([Vector3(side * 7.6, 0.132, off), Vector3(2.8, 0.03, 1.1)])
+	var parts: Array = []
+	for s in crosswalk_stripes:
+		parts.append([unit_box, _t(s[0], s[1])])
 	crosswalk_mesh = _merged(parts)
 	# Detail Pass 1 clutter meshes (cheap on purpose: the density
 	# budget is paid in instances, not triangles)

@@ -28,6 +28,21 @@ var facade_seeds: Array = []
 var facade_lit_ratios: Array = []
 var _facade_seed_used := {}
 
+# Layout constants — the single source of truth shared by the
+# placement code below and the markings model / autotest.
+const PITCH := 52.0        # grid pitch: roads + clusters share it
+const ROAD_HALF := 5.0     # road strips are 10 wide, on grid lines
+const PAD_HALF := 20.0     # block pads are 40x40, on grid points
+const WORLD_HALF := 120.0  # slab / road strips span 240
+const ROAD_TOP_Y := 0.115  # asphalt top (centre y 0.09 + 0.05 / 2); raised above PAD_TOP_Y by the Detail 1 markings fix so the strips stay the top surface where pads overlap them
+const PAD_TOP_Y := 0.10    # pad top (centre y 0.05 + 0.1 / 2)
+
+# Marking / pad registries (read by the autotest): the positions
+# actually placed, so checks test the build, not a re-derivation.
+var dash_positions: Array = []       # world centres of lane dashes
+var crosswalk_positions: Array = []  # world centres of zebra stripes
+var pad_centres: Array = []          # Vector2 centres of pads laid
+
 func _init() -> void:
 	dressing = CityDressing.new()
 
@@ -66,6 +81,50 @@ func _setup_environment(parent: Node3D) -> void:
 	sun.light_energy = 1.1
 	parent.add_child(sun)
 
+# The pads this build lays (centres). Placement AND the markings
+# model read this one list, so they can never drift apart.
+func _compute_pad_centres() -> Array:
+	var out: Array = []
+	for bx in range(-2, 3):
+		for bz in range(-2, 3):
+			out.append(Vector2(bx * PITCH, bz * PITCH))
+	return out
+
+# --- Markings model (shared by placement + the autotest) ---
+# A point is ROAD SURFACE when it lies on a road strip AND the
+# asphalt is the topmost ground surface there. Where a pad
+# overlaps a strip, whichever top is higher is what a marking
+# paints — with PAD_TOP_Y > ROAD_TOP_Y the pads pave over the
+# roads at every cluster, which is the Detail 1 playtest bug
+# (markings rendering on the sidewalks).
+func _on_road_strip(x: float, z: float) -> bool:
+	for i in range(-2, 3):
+		if absf(x - i * PITCH) <= ROAD_HALF and absf(z) <= WORLD_HALF:
+			return true
+		if absf(z - i * PITCH) <= ROAD_HALF and absf(x) <= WORLD_HALF:
+			return true
+	return false
+
+func _top_surface_y(x: float, z: float) -> float:
+	var top := 0.0  # ground slab top
+	if _on_road_strip(x, z):
+		top = maxf(top, ROAD_TOP_Y)
+	for c in pad_centres:
+		if absf(x - c.x) <= PAD_HALF and absf(z - c.y) <= PAD_HALF:
+			top = maxf(top, PAD_TOP_Y)
+	return top
+
+func is_asphalt(x: float, z: float) -> bool:
+	return _on_road_strip(x, z) and _top_surface_y(x, z) <= ROAD_TOP_Y
+
+# The crossing square of two road strips at a grid point.
+func in_intersection_box(x: float, z: float) -> bool:
+	for i in range(-2, 3):
+		for j in range(-2, 3):
+			if absf(x - i * PITCH) <= ROAD_HALF and absf(z - j * PITCH) <= ROAD_HALF:
+				return true
+	return false
+
 func _point_free(x: float, z: float, grow: float) -> bool:
 	var p := Vector2(x, z)
 	for r in buildings:
@@ -77,6 +136,7 @@ func _build_city(parent: Node3D) -> void:
 	# Gate 3D-2 city: same layout grid as 3D-0/1 (roads on the 52
 	# pitch, building clusters on the grid points, centre cluster
 	# open) — but dressed. All resources come from CityDressing.
+	pad_centres = _compute_pad_centres()
 	var d := dressing
 	# ground slab with collision (noise-concrete material now)
 	var ground := StaticBody3D.new()
@@ -97,16 +157,24 @@ func _build_city(parent: Node3D) -> void:
 	gshape.position = Vector3(0, -0.5, 0)
 	ground.add_child(gshape)
 	parent.add_child(ground)
-	# roads: asphalt-textured strips on the grid
+	# roads: asphalt-textured strips on the grid. Detail 1 markings
+	# fix: strip centre y 0.09 puts the asphalt top (0.115) ABOVE
+	# the pad tops (0.10), so the road surface — and its markings —
+	# stays on top where a block pad overlaps a strip, instead of
+	# the pad paving over the road at every cluster.
 	for i in range(-2, 3):
-		_road(parent, Vector3(i * 52, 0.02, 0), Vector3(10, 0.05, 240))
-		_road(parent, Vector3(0, 0.02, i * 52), Vector3(240, 0.05, 10))
+		_road(parent, Vector3(i * PITCH, 0.09, 0), Vector3(10, 0.05, 240))
+		_road(parent, Vector3(0, 0.09, i * PITCH), Vector3(240, 0.05, 10))
 	# dashed lane markings down every road centre (one MultiMesh)
 	var dash_xf: Array = []
 	for i in range(-2, 3):
 		for k in range(-19, 20):
-			dash_xf.append(d.xf(Vector3(i * 52, 0.09, k * 6.0)))
-			dash_xf.append(d.xf(Vector3(k * 6.0, 0.09, i * 52), PI / 2.0))
+			var dp1 := Vector3(i * PITCH, 0.09, k * 6.0)
+			var dp2 := Vector3(k * 6.0, 0.09, i * PITCH)
+			dash_xf.append(d.xf(dp1))
+			dash_xf.append(d.xf(dp2, PI / 2.0))
+			dash_positions.append(dp1)
+			dash_positions.append(dp2)
 	parent.add_child(d.make_multimesh(d.dash_mesh, d.dash_mat, dash_xf))
 	# crosswalks at the open centre intersection (the other grid
 	# intersections are built over by the clusters, as in 3D-0/1)
@@ -114,6 +182,8 @@ func _build_city(parent: Node3D) -> void:
 	cw.mesh = d.crosswalk_mesh
 	cw.material_override = d.crosswalk_mat
 	parent.add_child(cw)
+	for s in d.crosswalk_stripes:
+		crosswalk_positions.append(s[0])
 	# buildings: seeded clusters, 1-3 dressed buildings per grid point
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 2004  # San Andreas launch year, why not
@@ -123,15 +193,16 @@ func _build_city(parent: Node3D) -> void:
 	for bx in range(-2, 3):
 		for bz in range(-2, 3):
 			# pavement pad under each cluster (its edge is the curb)
-			var pad := MeshInstance3D.new()
-			var pbm := BoxMesh.new()
-			pbm.size = Vector3(40, 0.1, 40)
-			pad.mesh = pbm
-			pad.position = Vector3(bx * 52, 0.05, bz * 52)
-			var pmat := d.pavement_mat.duplicate() as StandardMaterial3D
-			pmat.uv1_scale = Vector3(10, 10, 1)
-			pad.material_override = pmat
-			parent.add_child(pad)
+			if pad_centres.has(Vector2(bx * PITCH, bz * PITCH)):
+				var pad := MeshInstance3D.new()
+				var pbm := BoxMesh.new()
+				pbm.size = Vector3(40, 0.1, 40)
+				pad.mesh = pbm
+				pad.position = Vector3(bx * PITCH, 0.05, bz * PITCH)
+				var pmat := d.pavement_mat.duplicate() as StandardMaterial3D
+				pmat.uv1_scale = Vector3(10, 10, 1)
+				pad.material_override = pmat
+				parent.add_child(pad)
 			if bx == 0 and bz == 0:
 				continue  # spawn block stays open (pad only)
 			var n := 1 + rng.randi() % 3

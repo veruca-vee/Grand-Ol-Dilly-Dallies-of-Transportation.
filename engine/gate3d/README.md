@@ -301,6 +301,9 @@ and passes all three autotest lines. Zipped as
 `builds/GODOT-Linux-Gate3D2-walkfix.zip` (24,283,771 bytes).
 Walking FEEL on real hardware is **[unverified]** — Vee walking it
 on iwantitnow is the check, as always.
+**VERDICT (2026-10-31, Vee, from the Detail 1 playtest on
+iwantitnow): "walking is a lot better."** The [unverified] label
+on walking feel is CLOSED.
 
 ## Engine Core gate (2026-10-30) — the engine, extracted
 
@@ -516,3 +519,76 @@ contract it verifies is unchanged.
 - Visual quality on real hardware (iwantitnow, Celeron UHD
   600): **[unverified]** until Vee runs this build — headless
   and Xvfb checks prove structure and pixels, not game feel.
+
+## Detail 1 fix: markings (2026-10-31, from Vee's playtest)
+
+Vee's report, playing the Detail Pass 1 build on iwantitnow (with
+screenshots): **"The markings for the road are on the sidewalks."**
+Lane dashes and crosswalk stripes rendered on the light pavement
+pads instead of the dark asphalt. Fixed under METHOD.md
+(red → green → refactor), contract-first.
+
+**Root cause (one sentence):** the 40×40 block pads are centred
+on the same grid points as the 10-wide road strips and their tops
+(y = 0.10) sat above the asphalt tops (y = 0.045), so the pads
+paved over the road surface at every cluster — and the markings,
+which poke above the pads (dash tops y = 0.14; crosswalk stripes
+placed "0.02 proud of the intersection pad"), painted the
+pavement instead of the road.
+
+**The model (test + placement share it):** `CityBuilder` gained
+layout constants (PITCH 52, ROAD_HALF 5, PAD_HALF 20, WORLD_HALF
+120, ROAD_TOP_Y, PAD_TOP_Y), registries of what was actually
+placed (`dash_positions`, `crosswalk_positions`, `pad_centres`),
+and two pure functions: `is_asphalt(x, z)` — on a road strip AND
+asphalt is the topmost surface there (where a pad overlaps a
+strip, the higher top wins) — and `in_intersection_box(x, z)` —
+the strips' crossing square. `CityDressing.crosswalk_stripes`
+([centre, size] per stripe) is now the single source the mesh is
+baked from and the registry reads. Scaffolding landed first and
+was verified behaviour-neutral (suite green; census nodes 796,
+instances ~1.32k as before — the count wobbles ±10 run-to-run
+from global-RNG prop skips, nodes are exact).
+
+**RED (recorded before the fix, exit 1; the four existing PASS
+lines still printed verbatim above these):**
+```
+AUTOTEST FAIL: markings_on_roads: 330 of 390 lane dashes are not on exposed asphalt (first at (-104, 0.09, -114))
+AUTOTEST FAIL: markings_on_roads: 20 of 20 crosswalk stripes are not on asphalt or an intersection box (first at (-4, 0.105, -7.6))
+```
+
+**GREEN (minimal fix, two numbers + one):** road strip centre
+y 0.02 → 0.09 in `CityBuilder._build_city`, so the asphalt top
+(0.115) sits above the pad tops (0.10) and the strips stay the
+top surface through pad overlaps (`ROAD_TOP_Y` const updated to
+match — the model function itself did not change); crosswalk
+stripe centre y 0.105 → 0.132 in `CityDressing`, putting the
+slabs just proud of the raised asphalt (paint ON the road).
+Nothing deleted: all 390 dashes and 20 stripes remain, now on
+asphalt. (Filtering dashes to the exposed gaps between pads was
+rejected: it would have cut ~350 MultiMesh instances and broken
+the density_budget contract, ≥ 1246.) New fifth line, project
+and exported binary: `AUTOTEST PASS: markings_on_roads`.
+Refactor: the road calls now use the PITCH constant like the
+rest of the layout code; suite identically green after, and all
+four SMOKETEST PASS lines unchanged.
+
+**Validation:** Xvfb `--markshot` (new debug flag, sibling of
+`--screenshot`: stands on the vertical road at z = 15 looking
+north) — the frame shows the centreline dash and all four zebra
+approaches on the dark asphalt, pavement pads bare. Pixel check
+(PIL, road ROI): 5,322 marking-coloured pixels; **0 of 24,300
+pixels in the pavement control region are marking-coloured**;
+marking pixels' horizontal neighbours have median luminance
+0.245, matching the foreground-asphalt control (0.234), not the
+pavement control (0.530). 1200-frame headless run: exit 0, zero
+script errors, zero parse errors (419 "Parameter m is null"
+headless artifacts, counted, known).
+
+**Export:** `builds/GODOT-Linux/GODOT.x86_64`, 66,240,112 bytes,
+sha256 `51abed46193e5f726d8ec80811cc908cf9c34e3fa51fd55e6fe8519d48eb4ebd`;
+exported binary: 300 frames clean, all five AUTOTEST PASS lines.
+Zip: `builds/GODOT-Linux-Detail1-markfix.zip` (24,325,845 bytes,
+sha256 `3fad94f82fb035592b3c9a8a26d8f71bcecfc804cfb000faee4cc253307e63b1`).
+Markings look on real hardware: **[unverified]** until Vee runs
+this build — same rule as always.

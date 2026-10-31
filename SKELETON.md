@@ -188,7 +188,8 @@ and an actual simulator"
   verbatim, in project and exported binary; 1200 frames headless
   zero script errors. New export 66,193,968 bytes, sha256
   b43e6d14…e0de, zip `builds/GODOT-Linux-Gate3D2-walkfix.zip`.
-  Walking feel **[unverified]** until Vee walks it on iwantitnow.
+  Walking feel **VERIFIED BY VEE, 2026-10-31** (her words, from
+  the Detail 1 playtest): "walking is a lot better." Label closed.
 
 ## Engine Core gate status (2026-10-30, built + verified headless)
 
@@ -251,6 +252,23 @@ and an actual simulator"
 - Linux export 66,236,736 bytes, sha256 73308054…ec26, zip
   `builds/GODOT-Linux-Detail1.zip`. **Visual quality on real
   hardware (iwantitnow): [unverified]** until Vee runs it.
+- **Playtest result (Vee, iwantitnow, 2026-10-31): game works,
+  walking "a lot better" — and a BUG: "The markings for the road
+  are on the sidewalks."** Root cause: the 40×40 block pads are
+  centred on the same grid points as the road strips and their
+  tops (y = 0.10) sat above the asphalt tops (y = 0.045), so the
+  pads paved over the roads at every cluster and the markings
+  painted the pads. **FIXED same day (TDD):** new autotest
+  segment `markings_on_roads` went RED first (330 of 390 dashes
+  + all 20 crosswalk stripes off asphalt), road strips raised
+  (asphalt top 0.115 > pad top 0.10) and crosswalk stripes
+  re-seated (y 0.132) — GREEN, full suite + smoketest green,
+  Xvfb pixel check: 0 marking-coloured pixels on pavement,
+  neighbours' median luminance 0.245 = asphalt. Build:
+  66,240,112 bytes, sha256 51abed46…4ebd, zip
+  `builds/GODOT-Linux-Detail1-markfix.zip`. Markings look on
+  real hardware: [unverified] until Vee runs the markfix build.
+  Full record: README "Detail 1 fix: markings".
 
 ## Gate 0 status (2026-10-29, verified)
 

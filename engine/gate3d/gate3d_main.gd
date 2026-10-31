@@ -201,6 +201,8 @@ func _ready() -> void:
 
 	if "--screenshot" in args or "--screenshot" in OS.get_cmdline_args():
 		_take_screenshot()
+	if "--markshot" in args or "--markshot" in OS.get_cmdline_args():
+		_take_markshot()
 	if "--countnodes" in args or "--countnodes" in OS.get_cmdline_args():
 		var counts := _scene_counts()
 		print("NODECOUNT: nodes=", counts.x, " multimesh_instances=", counts.y)
@@ -242,6 +244,21 @@ func _take_screenshot() -> void:
 	var path := "user://gate3d_shot.png"
 	img.save_png(path)
 	print("SCREENSHOT: ", ProjectSettings.globalize_path(path), " ", img.get_size())
+	get_tree().quit()
+
+# Detail 1 markings fix: frame a road with dashes — stand on the
+# vertical road south of the centre intersection, look north down
+# its centre line (dashes + crosswalk ahead, on asphalt now).
+func _take_markshot() -> void:
+	player.global_position = Vector3(0, 0.2, 15)
+	player.look_at(Vector3(0, 0.2, 4), Vector3.UP)
+	for i in range(100):
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	var path := "user://gate3d_markshot.png"
+	img.save_png(path)
+	print("MARKSHOT: ", ProjectSettings.globalize_path(path), " ", img.get_size())
 	get_tree().quit()
 
 # ---------- HUD ----------
@@ -1327,6 +1344,42 @@ func _run_autotest() -> void:
 	if node_count >= 900:
 		fails4.append("density_budget: %d scene nodes, expected < 900" % node_count)
 
+	# --- 9. Detail 1 fix: road markings lie on the road surface ---
+	# Vee's playtest (2026-10-31, iwantitnow, with screenshots):
+	# "The markings for the road are on the sidewalks." The model is
+	# CityBuilder's own layout math (is_asphalt / in_intersection_
+	# box, shared with placement): a marking is on the road when it
+	# sits on a road strip whose asphalt is the topmost surface —
+	# where a block pad overlaps a strip, the higher top wins, so
+	# markings under a taller pad paint pavement, not asphalt.
+	var fails5: Array[String] = []
+	var dash_v: Variant = city.get("dash_positions")
+	if dash_v == null or (dash_v as Array).is_empty():
+		fails5.append("markings_on_roads: no dash registry on CityBuilder")
+	else:
+		var off_road := 0
+		var first_off := Vector3.ZERO
+		for dp in dash_v:
+			if not city.is_asphalt(dp.x, dp.z):
+				off_road += 1
+				if off_road == 1:
+					first_off = dp
+		if off_road > 0:
+			fails5.append("markings_on_roads: %d of %d lane dashes are not on exposed asphalt (first at %s)" % [off_road, (dash_v as Array).size(), str(first_off)])
+	var cw_v: Variant = city.get("crosswalk_positions")
+	if cw_v == null or (cw_v as Array).is_empty():
+		fails5.append("markings_on_roads: no crosswalk registry on CityBuilder")
+	else:
+		var off_cw := 0
+		var first_cw := Vector3.ZERO
+		for sp in cw_v:
+			if not city.is_asphalt(sp.x, sp.z) and not city.in_intersection_box(sp.x, sp.z):
+				off_cw += 1
+				if off_cw == 1:
+					first_cw = sp
+		if off_cw > 0:
+			fails5.append("markings_on_roads: %d of %d crosswalk stripes are not on asphalt or an intersection box (first at %s)" % [off_cw, (cw_v as Array).size(), str(first_cw)])
+
 	if fails.is_empty():
 		print("AUTOTEST PASS: smg_ped_kill cash+score+combo | smg_cop_damage+kill | wanted_floor caps spawn_types | driveby_cooldown_ticks")
 	else:
@@ -1347,4 +1400,9 @@ func _run_autotest() -> void:
 	else:
 		for f in fails4:
 			print("AUTOTEST FAIL: ", f)
-	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() else 1)
+	if fails5.is_empty():
+		print("AUTOTEST PASS: markings_on_roads")
+	else:
+		for f in fails5:
+			print("AUTOTEST FAIL: ", f)
+	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() else 1)
