@@ -1,5 +1,5 @@
 class_name Ped3D
-extends FlappyPerson3D
+extends FlapRig
 
 # Gate 3D-1: peds keep the Gate 3D-0 wander + random talk, and gain
 # the Gate 0 flee rule (scripts/ped.gd): within flee radius of the

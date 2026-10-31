@@ -1,5 +1,5 @@
 class_name Player3D
-extends FlappyPerson3D
+extends FlapRig
 
 # Gate 3D-1: the player now carries the Gate 0 combat state — hp,
 # weapon selection, fire cooldown. Firing itself (input, camera-ray
@@ -60,31 +60,19 @@ func _physics_process(delta: float) -> void:
 	if driving != null:
 		return  # main syncs our position to the car
 	# Walk input as a 2D vector: x = strafe (D-A), y = forward (W-S).
-	var input_vec := Vector2.ZERO
+	# Input reading + the camera-relative math are ENGINE CORE
+	# (core/controller.gd, core/follow_camera.gd owns the yaw):
+	# W walks where the follow camera looks, not world-north (the
+	# Gate 3D-2 walk fix). The seam below lets the autotest walk.
+	var input_vec := Controller.read_walk_input()
 	if not is_nan(move_override.x):
 		input_vec = move_override
-	else:
-		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-			input_vec.y += 1
-		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-			input_vec.y -= 1
-		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-			input_vec.x -= 1
-		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-			input_vec.x += 1
-	# Movement is CAMERA-RELATIVE (Gate 3D-2 walk fix): W walks where
-	# the follow camera looks, not world-north. The camera math lives
-	# in gate3d_main: behind the actor is Vector3(sin(cam_yaw), 0,
-	# cos(cam_yaw)), so camera forward is its negation. At cam_yaw 0
-	# forward is (0,0,-1) and right is (1,0,0), matching the old axes.
 	var yaw := 0.0
 	if main != null:
 		var yv: Variant = main.get("cam_yaw")
 		if yv != null:
 			yaw = float(yv)
-	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
-	var right := fwd.cross(Vector3.UP)
-	var dir := (fwd * input_vec.y + right * input_vec.x).normalized()
+	var dir := Controller.move_dir(input_vec, yaw)
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 	else:

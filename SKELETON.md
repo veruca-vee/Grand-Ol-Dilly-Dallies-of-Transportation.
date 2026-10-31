@@ -190,6 +190,40 @@ and an actual simulator"
   b43e6d14…e0de, zip `builds/GODOT-Linux-Gate3D2-walkfix.zip`.
   Walking feel **[unverified]** until Vee walks it on iwantitnow.
 
+## Engine Core gate status (2026-10-30, built + verified headless)
+
+- Direction (Vee, 2026-10-30): master the engine before detail
+  work, so it can be quick-ported to other games as their engine.
+  Plan: `design/ENGINE_CORE_PLAN.md`. The engine's name slot stays
+  BLANK (Vee's call).
+- Done: the reusable systems were extracted from the 1,562-line
+  `gate3d_main.gd` into `engine/core/` — `gate3d_main.gd` is now
+  1,183 lines of wiring + G.O.D.O.T-specific rules. Modules:
+  data_loader, save_game, sfx_synth, economy, upgrades, wanted,
+  combat, controller, follow_camera, hud_kit, minimap, flap_rig
+  (was flappy_person3d), city_dressing + city_builder. Guide:
+  `engine/core/README.md`; full module map + labelled deviations
+  (no `game/` folder split, spawn/combat split at selection vs
+  consequences, city layout constants as the known seam) in
+  `engine/gate3d/README.md`.
+- Contract held: extracted one module per step, full autotest
+  after every step — all three AUTOTEST PASS lines verbatim at
+  every step, and again in the final exported binary. One latent
+  bug found + fixed en route (freed shooter passed through a
+  typed Object parameter in Combat's projectile resolution).
+- PORT TEST PASSED: `engine/smoketest/` (throwaway fixture, own
+  data: 1 weapon, 1 enemy, different upgrade costs) boots only
+  `core/` and prints SMOKETEST PASS for move / shoot / buy (+
+  wanted/save/flap/sfx bonus line), headless, exit 0.
+- Final verification (2026-10-30): import clean; main scene 1200
+  frames headless, zero script errors (401 "Parameter m is null"
+  artifact lines, identical to the pre-gate baseline); all three
+  AUTOTEST PASS lines in project AND in the exported binary
+  (which also ran 300 frames clean). Linux export 66,222,912
+  bytes, sha256 9b509c13…2fec, zip
+  `builds/GODOT-Linux-EngineCore.zip`. Game feel unchanged by
+  construction — this gate moved code, it did not tune anything.
+
 ## Gate 0 status (2026-10-29, verified)
 
 - Built in `engine/` (Godot 4.3): main/city/player/car/ped/enemy/bullet/

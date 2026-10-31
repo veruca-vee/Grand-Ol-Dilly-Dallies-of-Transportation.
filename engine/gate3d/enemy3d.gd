@@ -1,5 +1,5 @@
 class_name Enemy3D
-extends FlappyPerson3D
+extends FlapRig
 
 # Cop / SWAT / military in 3D. Stats come from
 # data/enemies_world_wanted.json via setup(), exactly as scripts/enemy.gd.
@@ -33,7 +33,7 @@ func setup(kind_: String, stats: Dictionary) -> void:
 	bullet_life_frames = float(stats.get("range", 350)) / 18.0
 	shirt_color = Color(stats.get("color", "#4488ff"))
 	# Gate 3D-2 dressing: cops and military wear caps (see
-	# flappy_person3d); SWAT's near-black kit reads as-is.
+	# core/flap_rig); SWAT's near-black kit reads as-is.
 	if kind == "cop":
 		cap_enabled = true
 		cap_color = Color(0.08, 0.12, 0.32)

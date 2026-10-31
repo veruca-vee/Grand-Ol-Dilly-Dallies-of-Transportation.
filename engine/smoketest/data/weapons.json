@@ -1,0 +1,1 @@
+{"_source":"SMOKETEST fixture data — deliberately NOT G.O.D.O.T's numbers (1 weapon, different damage).","driveby_weapon":{"color":"#00ffcc","count":1,"dmg":5,"name":"TEST POPPER","range":300,"rate_frames":10,"spread":0.1},"player_start_weapon_index":0,"weapons":[{"color":"#00ffcc","count":1,"dmg":25,"name":"TEST BLASTER","range":400,"rate_frames":10,"spread":0}]}

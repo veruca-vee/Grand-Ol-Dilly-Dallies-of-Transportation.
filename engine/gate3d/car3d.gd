@@ -139,16 +139,10 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.y = -0.5
 	if driven and not dead:
-		var throttle := 0.0
-		var steer := 0.0
-		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-			throttle += 1.0
-		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-			throttle -= 1.0
-		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-			steer += 1.0
-		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-			steer -= 1.0
+		# input reading is ENGINE CORE (core/controller.gd)
+		var drive_input := Controller.read_drive_input()
+		var throttle := drive_input.y
+		var steer := drive_input.x
 		speed += throttle * accel * delta
 		speed = clamp(speed, -max_speed * 0.4, max_speed)
 		if throttle == 0.0:
