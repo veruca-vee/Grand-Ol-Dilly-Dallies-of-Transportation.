@@ -224,6 +224,34 @@ and an actual simulator"
   `builds/GODOT-Linux-EngineCore.zip`. Game feel unchanged by
   construction — this gate moved code, it did not tune anything.
 
+## Detail Pass 1 status (2026-10-31, built + verified headless/Xvfb)
+
+- Spec: `design/DETAIL1_SPEC.md` ("The street feels inhabited");
+  plan/tasks: `design/DETAIL1_PLAN.md`; built under
+  `design/METHOD.md` (TDD: red recorded → green per task →
+  refactor → validate/review). Gate section:
+  `engine/gate3d/README.md`.
+- Done: walk cycles on flap-rig characters (pivots at hips/
+  shoulders, phase from distance, settles when stopped; head/
+  hinge proportions untouched), 3 car silhouettes × 10 paints
+  (collision unchanged), ~20 emissive storefront signs with
+  generated textures + a unique facade seed and lit-window
+  ratio per building, and street-clutter density at 2.13× the
+  Gate 3D-2 baseline (≈1,320 MultiMesh instances, 796 nodes <
+  900 budget) — all new clutter is MultiMesh, props still
+  non-colliding.
+- Contract: new line `AUTOTEST PASS: detail1 walk_cycle
+  car_variants signage density_budget` joins the three existing
+  lines; all four pass in the project AND the exported binary;
+  smoketest's four lines unchanged. RED evidence (12 FAIL lines
+  before implementation) is quoted in the README gate section.
+- Xvfb screenshot framed on sign #1 pixel-checked: its violet
+  accent (C77DFF) present at ≈6,100 pixels, glyph bars + panel
+  confirmed. 1200-frame run: zero script errors.
+- Linux export 66,236,736 bytes, sha256 73308054…ec26, zip
+  `builds/GODOT-Linux-Detail1.zip`. **Visual quality on real
+  hardware (iwantitnow): [unverified]** until Vee runs it.
+
 ## Gate 0 status (2026-10-29, verified)
 
 - Built in `engine/` (Godot 4.3): main/city/player/car/ped/enemy/bullet/

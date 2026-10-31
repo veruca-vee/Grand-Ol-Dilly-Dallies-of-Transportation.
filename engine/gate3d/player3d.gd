@@ -85,4 +85,5 @@ func _physics_process(delta: float) -> void:
 		fire_flap_time -= delta
 	is_talking = Input.is_key_pressed(KEY_T) or fire_flap_time > 0.0
 	move_and_slide()
+	tick_walk(delta)
 	tick_flap(delta)

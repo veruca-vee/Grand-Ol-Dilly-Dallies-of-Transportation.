@@ -174,11 +174,12 @@ func _ready() -> void:
 	player.hp = player.max_hp
 	player.weapon_index = int(DataLoader.load_json("res://data/weapons.json").get("player_start_weapon_index", 1))
 	player.refresh_gun(weapons[player.weapon_index])
-	var car_colors := [Color(0.75, 0.25, 0.25), Color(0.25, 0.35, 0.8), Color(0.3, 0.65, 0.3), Color(0.8, 0.7, 0.2), Color(0.55, 0.57, 0.62), Color(0.45, 0.2, 0.55)]
 	var car_spots := [Vector3(4, 0.2, -2), Vector3(-14, 0.2, -30), Vector3(20, 0.2, 24), Vector3(-30, 0.2, 18), Vector3(30, 0.2, -34), Vector3(-24, 0.2, 44)]
 	for i in range(car_spots.size()):
 		var car := Car3D.new()
-		car.car_color = car_colors[i]
+		# Detail Pass 1: deterministic spread of silhouettes + paints
+		car.body_style = i % 3
+		car.car_color = Car3D.PALETTE[i % Car3D.PALETTE.size()]
 		car.position = car_spots[i]
 		car.rotation.y = randf() * TAU
 		car.main = self
@@ -201,22 +202,39 @@ func _ready() -> void:
 	if "--screenshot" in args or "--screenshot" in OS.get_cmdline_args():
 		_take_screenshot()
 	if "--countnodes" in args or "--countnodes" in OS.get_cmdline_args():
-		var mm_instances := 0
-		var stack: Array = [self]
-		while not stack.is_empty():
-			var n: Node = stack.pop_back()
-			if n is MultiMeshInstance3D and n.multimesh != null:
-				mm_instances += n.multimesh.instance_count
-			for ch in n.get_children():
-				stack.append(ch)
-		print("NODECOUNT: nodes=", get_tree().get_node_count(), " multimesh_instances=", mm_instances)
+		var counts := _scene_counts()
+		print("NODECOUNT: nodes=", counts.x, " multimesh_instances=", counts.y)
 	if autotest:
 		_run_autotest()
+
+# Scene census shared by --countnodes and the autotest density
+# check: (total tree nodes, total MultiMesh instances).
+func _scene_counts() -> Vector2i:
+	var mm_instances := 0
+	var stack: Array = [self]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is MultiMeshInstance3D and n.multimesh != null:
+			mm_instances += n.multimesh.instance_count
+		for ch in n.get_children():
+			stack.append(ch)
+	return Vector2i(get_tree().get_node_count(), mm_instances)
 
 # ---------- Debug: windowed screenshot for visual checks ----------
 func _take_screenshot() -> void:
 	# Used with a real (Xvfb) display, NOT headless: lets a human or
 	# the assistant eyeball the dressed city. Saves + quits.
+	# Detail Pass 1: frame the first storefront sign (stand on the
+	# road side of it, face it, let the follow-cam settle behind)
+	# so the visual check can pixel-test its accent colours.
+	if city != null and not city.sign_positions.is_empty():
+		var sp: Vector3 = city.sign_positions[0]
+		var centre := Vector3(roundf(sp.x / 52.0) * 52.0, 0, roundf(sp.z / 52.0) * 52.0)
+		var outward := sp - centre
+		outward.y = 0.0
+		outward = outward.normalized()
+		player.global_position = sp + outward * 8.0 + Vector3(0, 0.2, 0)
+		player.look_at(Vector3(sp.x, player.global_position.y, sp.z), Vector3.UP)
 	for i in range(100):
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
@@ -1165,6 +1183,150 @@ func _run_autotest() -> void:
 	elif sdisp.normalized().dot(expect_right) <= 0.8:
 		fails3.append("strafe right: displacement %s not along camera right %s (dot %.2f)" % [str(sdisp.normalized()), str(expect_right), sdisp.normalized().dot(expect_right)])
 
+	# --- 8. Detail Pass 1: walk cycle, car variants, signage, density ---
+	# Checks read new APIs through .get() duck seams so a missing
+	# feature fails as an assertion, not a parse error (the RED run
+	# of this section is recorded in gate3d/README.md).
+	var fails4: Array[String] = []
+	# (a) walk cycle: phase advances with distance while walking,
+	# swing is present while moving and settles when stopped; the
+	# flap head (pivot height, upper-head children) is untouched.
+	if player.driving != null:
+		_exit_car()
+	player.global_position = Vector3(0, 0.2, 8)
+	player.velocity = Vector3.ZERO
+	for i in range(3):
+		await get_tree().physics_frame
+	var phase0: Variant = player.get("walk_phase")
+	player.move_override = Vector2(0, 1)  # forward, camera-relative
+	var max_swing := 0.0
+	for i in range(40):
+		await get_tree().physics_frame
+		var sw: Variant = player.get("walk_swing")
+		if sw != null:
+			max_swing = maxf(max_swing, float(sw))
+	player.move_override = Vector2(NAN, NAN)
+	var phase1: Variant = player.get("walk_phase")
+	if phase0 == null or phase1 == null:
+		fails4.append("walk_cycle: player has no walk_phase (walk API missing)")
+	elif float(phase1) - float(phase0) < 1.0:
+		fails4.append("walk_cycle: phase advanced %.2f rad over 40 walking frames, expected > 1.0" % (float(phase1) - float(phase0)))
+	if max_swing < 0.15:
+		fails4.append("walk_cycle: max limb swing %.2f rad while walking, expected > 0.15" % max_swing)
+	for i in range(40):
+		await get_tree().physics_frame
+	var settle: Variant = player.get("walk_swing")
+	if settle == null or float(settle) > 0.05:
+		fails4.append("walk_cycle: swing did not settle when stopped (walk_swing=%s after 40 idle frames)" % str(settle))
+	if player.upper_pivot == null:
+		fails4.append("walk_cycle: upper_pivot missing (flap rig changed?)")
+	else:
+		if absf(player.upper_pivot.position.y - FlapRig.MOUTH_Y) > 0.001:
+			fails4.append("walk_cycle: upper_pivot y is %.3f, expected MOUTH_Y %.2f" % [player.upper_pivot.position.y, FlapRig.MOUTH_Y])
+		if player.upper_pivot.get_child_count() != 3:
+			fails4.append("walk_cycle: upper head has %d children, expected 3 (head box + 2 eyes)" % player.upper_pivot.get_child_count())
+	# a wandering ped walks too. A FRESH ped in open space: the
+	# parked ambient peds sit in an 8-body pile at (100,100), where
+	# a re-enabled ped just depenetrates on top of the pile and
+	# never walks (probe-verified, see README) — that tests pile
+	# physics, not the walk cycle.
+	var wped := Ped3D.new()
+	wped.main = self
+	add_child(wped)
+	wped.global_position = Vector3(6, 0.2, 16)  # open centre block
+	var pp0: Variant = wped.get("walk_phase")
+	for i in range(50):
+		await get_tree().physics_frame
+	var pp1: Variant = wped.get("walk_phase")
+	if pp0 == null or pp1 == null or float(pp1) - float(pp0) <= 0.3:
+		fails4.append("walk_cycle: a wandering ped's walk_phase did not advance")
+	wped.queue_free()
+	# and a chasing enemy
+	_spawn_enemy("cop", player.global_position + Vector3(0, 0, -20))
+	var ecop = enemies[enemies.size() - 1]
+	var ep0: Variant = ecop.get("walk_phase")
+	for i in range(40):
+		await get_tree().physics_frame
+	var ep1: Variant = ecop.get("walk_phase")
+	if ep0 == null or ep1 == null or float(ep1) - float(ep0) < 0.3:
+		fails4.append("walk_cycle: chasing enemy's walk_phase did not advance")
+	ecop.queue_free()
+	enemies.erase(ecop)
+
+	# (b) car variants: >= 3 silhouettes, palette >= 8 colours,
+	# wheels rotate proportional to speed (spin tracks speed / r)
+	var styles := {}
+	var car_colors_seen := {}
+	for c in cars:
+		var st: Variant = c.get("body_style")
+		if st != null:
+			styles[int(st)] = true
+		car_colors_seen[c.car_color] = true
+	if styles.size() < 3:
+		fails4.append("car_variants: %d distinct body_style values across spawned cars, expected >= 3" % styles.size())
+	var pal: Variant = cars[0].get("paint_colors")
+	if pal == null:
+		fails4.append("car_variants: cars expose no paint palette, expected >= 8 colours")
+	elif (pal as Array).size() < 8:
+		fails4.append("car_variants: paint palette has %d colours, expected >= 8" % (pal as Array).size())
+	if car_colors_seen.size() < 3:
+		fails4.append("car_variants: only %d distinct paint colours on spawned cars, expected >= 3" % car_colors_seen.size())
+	var wc: Car3D = cars[0]
+	wc.global_position = Vector3(-6, 0.2, 20)
+	wc.rotation.y = 0.0
+	wc.velocity = Vector3.ZERO
+	for i in range(3):
+		await get_tree().physics_frame
+	wc.speed = 12.0
+	var spin0: float = wc.spin_angle
+	for i in range(10):
+		await get_tree().physics_frame
+	var dspin: float = wc.spin_angle - spin0
+	if absf(dspin) < 2.0:
+		fails4.append("car_variants: wheel spin changed %.2f rad in 10 frames at speed 12, expected > 2.0 (speed/r)" % dspin)
+	wc.speed = 0.0
+
+	# (c) signage + facade variance (registries live on CityBuilder)
+	var sign_count_v: Variant = city.get("sign_count")
+	if sign_count_v == null or int(sign_count_v) < 12:
+		fails4.append("signage: sign_count is %s, expected >= 12" % str(sign_count_v))
+	var accents_v: Variant = city.get("sign_accents")
+	var acc_set := {}
+	if accents_v != null:
+		for a in accents_v:
+			acc_set[a] = true
+	if acc_set.size() < 4:
+		fails4.append("signage: %d distinct sign accent colours, expected >= 4" % acc_set.size())
+	var fseeds_v: Variant = city.get("facade_seeds")
+	if fseeds_v == null or (fseeds_v as Array).size() < 20:
+		fails4.append("signage: facade seed registry has %s entries, expected >= 20 buildings" % (str((fseeds_v as Array).size()) if fseeds_v != null else "none"))
+	else:
+		var seen := {}
+		var dup := false
+		for s in fseeds_v:
+			if seen.has(s):
+				dup = true
+			seen[s] = true
+		if dup:
+			fails4.append("signage: facade seeds are not unique per building")
+	var frat_v: Variant = city.get("facade_lit_ratios")
+	var rset := {}
+	if frat_v != null:
+		for r in frat_v:
+			rset[r] = true
+	if rset.size() < 10:
+		fails4.append("signage: only %d distinct lit-window ratios, expected >= 10 (variance)" % rset.size())
+
+	# (d) density budget: >= 2x the 623-instance Gate 3D-2/Engine
+	# Core baseline in MultiMesh instances, scene nodes < 900
+	var counts := _scene_counts()
+	var mm_instances: int = counts.y
+	var node_count: int = counts.x
+	if mm_instances < 1246:
+		fails4.append("density_budget: %d MultiMesh instances, expected >= 1246 (2x the 623 baseline)" % mm_instances)
+	if node_count >= 900:
+		fails4.append("density_budget: %d scene nodes, expected < 900" % node_count)
+
 	if fails.is_empty():
 		print("AUTOTEST PASS: smg_ped_kill cash+score+combo | smg_cop_damage+kill | wanted_floor caps spawn_types | driveby_cooldown_ticks")
 	else:
@@ -1180,4 +1342,9 @@ func _run_autotest() -> void:
 	else:
 		for f in fails3:
 			print("AUTOTEST FAIL: ", f)
-	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() else 1)
+	if fails4.is_empty():
+		print("AUTOTEST PASS: detail1 walk_cycle car_variants signage density_budget")
+	else:
+		for f in fails4:
+			print("AUTOTEST FAIL: ", f)
+	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() else 1)

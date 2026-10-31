@@ -35,6 +35,19 @@ var is_talking: bool = false
 var flap_time: float = 0.0
 var flap_amount: float = 0.0  # 0..1, read by tests / other systems
 var upper_pivot: Node3D = null
+# Detail Pass 1: walk-cycle limb pivots. Legs/arms hang from these
+# so they can swing; the head/hinge code below is NOT touched by
+# the walk cycle. walk_* state is read by tests / other systems.
+var leg_pivot_l: Node3D = null
+var leg_pivot_r: Node3D = null
+var arm_pivot_l: Node3D = null
+var arm_pivot_r: Node3D = null
+var walk_phase: float = 0.0  # radians; advances with distance travelled
+var walk_swing: float = 0.0  # current leg swing magnitude (radians)
+var walk_blend: float = 0.0  # 0..1 ease in/out so limbs settle at rest
+var walk_stride: float = 2.4  # phase radians per world unit travelled
+var walk_leg_amp: float = 0.55
+var walk_arm_amp: float = 0.38
 var body_shape: CollisionShape3D = null
 var built: bool = false
 
@@ -65,12 +78,17 @@ func _build_body() -> void:
 	body_shape.shape = cap
 	body_shape.position = Vector3(0, 0.85, 0)
 	add_child(body_shape)
-	# legs / torso / arms — flat boxes, PS2-era low-poly by construction
-	_box(Vector3(0.16, 0.5, 0.18), Vector3(-0.11, 0.25, 0), pants_color, self)
-	_box(Vector3(0.16, 0.5, 0.18), Vector3(0.11, 0.25, 0), pants_color, self)
+	# legs / torso / arms — flat boxes, PS2-era low-poly by
+	# construction. Detail Pass 1: legs and arms hang from hip /
+	# shoulder pivots so the walk cycle can swing them; box sizes
+	# are unchanged and the pivot offsets keep the limb spans the
+	# same as the old static boxes (legs ~0.02-0.52, arms
+	# 0.545-1.095).
+	leg_pivot_l = _limb(Vector3(-0.11, 0.52, 0), Vector3(0.16, 0.5, 0.18), Vector3(0, -0.25, 0), pants_color)
+	leg_pivot_r = _limb(Vector3(0.11, 0.52, 0), Vector3(0.16, 0.5, 0.18), Vector3(0, -0.25, 0), pants_color)
 	_box(Vector3(0.5, 0.62, 0.26), Vector3(0, 0.81, 0), shirt_color, self)
-	_box(Vector3(0.13, 0.55, 0.15), Vector3(-0.33, 0.82, 0), shirt_color.darkened(0.1), self)
-	_box(Vector3(0.13, 0.55, 0.15), Vector3(0.33, 0.82, 0), shirt_color.darkened(0.1), self)
+	arm_pivot_l = _limb(Vector3(-0.33, 1.095, 0), Vector3(0.13, 0.55, 0.15), Vector3(0, -0.275, 0), shirt_color.darkened(0.1))
+	arm_pivot_r = _limb(Vector3(0.33, 1.095, 0), Vector3(0.13, 0.55, 0.15), Vector3(0, -0.275, 0), shirt_color.darkened(0.1))
 	# lower head / jaw (below the split)
 	_box(Vector3(0.42, 0.15, 0.38), Vector3(0, MOUTH_Y - 0.075, 0), skin_color.darkened(0.05), self)
 	# upper head on its hinge pivot at the mouth line, back of the head
@@ -95,6 +113,14 @@ func _build_body() -> void:
 		eye.material_override = _mat(Color.BLACK)
 		upper_pivot.add_child(eye)
 
+# One swinging limb: a pivot at the joint, the box hanging below it.
+func _limb(joint: Vector3, box_size: Vector3, box_offset: Vector3, color: Color) -> Node3D:
+	var p := Node3D.new()
+	p.position = joint
+	add_child(p)
+	_box(box_size, box_offset, color, p)
+	return p
+
 func _ready() -> void:
 	# Gate 3D-1 collision scheme: world/buildings = layer 1,
 	# characters = layer 2, cars = layer 4; everyone collides with all.
@@ -111,6 +137,27 @@ func tick_flap(delta: float) -> void:
 	if upper_pivot != null:
 		# max opening ~0.55 rad at the hinge — the whole top of the head
 		upper_pivot.rotation.x = flap_amount * 0.55
+
+# Detail Pass 1 walk cycle: phase advances with distance
+# travelled (planar speed x stride), legs swing in anti-phase,
+# arms counter-swing, and the blend eases out when the body stops
+# so the limbs settle to neutral instead of freezing mid-stride.
+# Called by subclasses after move_and_slide(), beside tick_flap.
+func tick_walk(delta: float) -> void:
+	if leg_pivot_l == null:
+		return
+	var planar := Vector2(velocity.x, velocity.z).length()
+	if planar > 0.05:
+		walk_phase += planar * delta * walk_stride
+		walk_blend = move_toward(walk_blend, 1.0, delta * 8.0)
+	else:
+		walk_blend = move_toward(walk_blend, 0.0, delta * 8.0)
+	var s := sin(walk_phase)
+	leg_pivot_l.rotation.x = s * walk_leg_amp * walk_blend
+	leg_pivot_r.rotation.x = -s * walk_leg_amp * walk_blend
+	arm_pivot_l.rotation.x = -s * walk_arm_amp * walk_blend
+	arm_pivot_r.rotation.x = s * walk_arm_amp * walk_blend
+	walk_swing = absf(s) * walk_leg_amp * walk_blend
 
 func face_direction(dir: Vector3) -> void:
 	if dir.length() < 0.01:

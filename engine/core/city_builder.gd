@@ -18,6 +18,15 @@ extends RefCounted
 
 var dressing: CityDressing = null
 var buildings: Array = []  # Rect2 XZ footprints
+# Detail Pass 1 registries (read by the autotest + screenshot
+# framing): every building's facade seed / lit ratio, and every
+# mounted storefront sign.
+var sign_count: int = 0
+var sign_accents: Array = []
+var sign_positions: Array = []  # world Vector3 of each sign centre
+var facade_seeds: Array = []
+var facade_lit_ratios: Array = []
+var _facade_seed_used := {}
 
 func _init() -> void:
 	dressing = CityDressing.new()
@@ -139,7 +148,7 @@ func _build_city(parent: Node3D) -> void:
 				var h := rng.randf_range(6.0, 28.0)
 				var cx: float = bx * 52 + o.x + rng.randf_range(-1.5, 1.5)
 				var cz: float = bz * 52 + o.y + rng.randf_range(-1.5, 1.5)
-				_building(parent, Vector3(cx, 0, cz), Vector3(w, h, dep), rng)
+				_building(parent, Vector3(cx, 0, cz), Vector3(w, h, dep), rng, Vector2(bx * 52, bz * 52))
 				if rng.randf() < 0.5:
 					ac_xf.append(d.xf(Vector3(cx + rng.randf_range(-w / 4, w / 4), h + 0.55, cz + rng.randf_range(-dep / 4, dep / 4)), rng.randf() * TAU))
 				if h > 17.0 and rng.randf() < 0.6:
@@ -164,7 +173,7 @@ func _road(parent: Node3D, pos: Vector3, size: Vector3) -> void:
 	mi.material_override = m
 	parent.add_child(mi)
 
-func _building(parent: Node3D, pos: Vector3, size: Vector3, rng: RandomNumberGenerator) -> void:
+func _building(parent: Node3D, pos: Vector3, size: Vector3, rng: RandomNumberGenerator, cluster_centre: Vector2 = Vector2.ZERO) -> void:
 	var d := dressing
 	var body := StaticBody3D.new()
 	body.position = Vector3(pos.x, 0, pos.z)
@@ -176,7 +185,17 @@ func _building(parent: Node3D, pos: Vector3, size: Vector3, rng: RandomNumberGen
 	# facade texture with per-building UV scale so windows stay
 	# roughly the same size whatever the footprint (texture: 6 cols
 	# over ~10.8 units, 12 rows over ~22 units)
-	var fm := d.facade_materials[rng.randi() % d.facade_materials.size()].duplicate() as StandardMaterial3D
+	# Detail Pass 1: a UNIQUE facade seed + lit-window ratio per
+	# building (stronger than "adjacent buildings differ"), so no
+	# two buildings share a facade or a lit pattern.
+	var fseed := 77003 + facade_seeds.size() * 131 + rng.randi_range(0, 60)
+	while _facade_seed_used.has(fseed):
+		fseed += 1
+	_facade_seed_used[fseed] = true
+	var lit_ratio := rng.randf_range(0.08, 0.50)
+	facade_seeds.append(fseed)
+	facade_lit_ratios.append(lit_ratio)
+	var fm := d.make_facade_material(d.facade_bases[rng.randi() % d.facade_bases.size()], fseed, lit_ratio)
 	fm.uv1_scale = Vector3(maxf(size.x, size.z) / 10.8, size.y / 22.0, 1)
 	mi.material_override = fm
 	body.add_child(mi)
@@ -210,8 +229,40 @@ func _building(parent: Node3D, pos: Vector3, size: Vector3, rng: RandomNumberGen
 		awn.position = Vector3(0, 2.28, 0)
 		awn.material_override = d.awning_mats[rng.randi() % d.awning_mats.size()]
 		body.add_child(awn)
+		# Detail Pass 1: most storefronts carry an emissive sign
+		if rng.randf() < 0.55:
+			_mount_sign(body, pos, size, cluster_centre, rng)
 	buildings.append(Rect2(pos.x - size.x / 2, pos.z - size.z / 2, size.x, size.z))
 	parent.add_child(body)
+
+# Detail Pass 1: mount one emissive sign on the building face
+# pointing away from the cluster centre (toward the pad edge /
+# road), above the awning. One node per sign.
+func _mount_sign(body: Node3D, pos: Vector3, size: Vector3, centre: Vector2, rng: RandomNumberGenerator) -> void:
+	var d := dressing
+	var rel := Vector2(pos.x - centre.x, pos.z - centre.y)
+	var normal := Vector3(0, 0, 1)
+	var along_x := false
+	if absf(rel.x) > absf(rel.y):
+		normal = Vector3(signf(rel.x), 0, 0)
+		along_x = true
+	elif absf(rel.y) > 0.01:
+		normal = Vector3(0, 0, signf(rel.y))
+	var accent: Color = CityDressing.SIGN_ACCENTS[rng.randi() % CityDressing.SIGN_ACCENTS.size()]
+	var sign := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(3.4, 0.85, 0.12)
+	sign.mesh = bm
+	var half := (size.x / 2.0 + 0.10) if along_x else (size.z / 2.0 + 0.10)
+	sign.position = Vector3(normal.x * half, 3.1, normal.z * half)
+	if along_x:
+		sign.rotation.y = PI / 2.0
+	sign.material_override = d.make_sign_material(accent, 4000 + sign_count * 17 + rng.randi_range(0, 9))
+	body.add_child(sign)
+	sign_count += 1
+	if not sign_accents.has(accent):
+		sign_accents.append(accent)
+	sign_positions.append(pos + sign.position)
 
 func _build_props(parent: Node3D, rng: RandomNumberGenerator, d: CityDressing, tower_spots: Array) -> void:
 	# Rooftop water towers (a few, individual nodes): 4 legs, a
@@ -254,8 +305,8 @@ func _build_props(parent: Node3D, rng: RandomNumberGenerator, d: CityDressing, t
 	var light_xf: Array = []
 	var head_xf: Array = []
 	for i in range(-2, 3):
-		for k in range(6):
-			var along := -97.5 + k * 39.0
+		for k in range(8):
+			var along := -113.75 + k * 32.5
 			var side := 1.0 if (k + i) % 2 == 0 else -1.0
 			# vertical road at x = i*52
 			var vx := i * 52 + side * 5.9
@@ -308,7 +359,7 @@ func _build_props(parent: Node3D, rng: RandomNumberGenerator, d: CityDressing, t
 	for bx in range(-2, 3):
 		for bz in range(-2, 3):
 			for corner in [Vector2(-17, -17), Vector2(17, -17), Vector2(-17, 17), Vector2(17, 17)]:
-				if rng.randf() < 0.45:
+				if rng.randf() < 0.20:
 					continue
 				var tx: float = bx * 52 + corner.x + rng.randf_range(-2, 2)
 				var tz: float = bz * 52 + corner.y + rng.randf_range(-2, 2)
@@ -351,7 +402,7 @@ func _build_props(parent: Node3D, rng: RandomNumberGenerator, d: CityDressing, t
 	# Crates + barriers scattered on pads (MultiMesh)
 	var crate_xf: Array = []
 	var barrier_xf: Array = []
-	for i in range(26):
+	for i in range(70):
 		var px := (randi_range(-2, 2)) * 52 + rng.randf_range(-19, 19)
 		var pz := (randi_range(-2, 2)) * 52 + rng.randf_range(-19, 19)
 		if not _point_free(px, pz, 1.0):
@@ -362,6 +413,75 @@ func _build_props(parent: Node3D, rng: RandomNumberGenerator, d: CityDressing, t
 			crate_xf.append(d.xf(Vector3(px, 0.38, pz), rng.randf() * TAU, rng.randf_range(0.8, 1.3)))
 	parent.add_child(d.make_multimesh(d.crate_mesh, d.crate_mat, crate_xf))
 	parent.add_child(d.make_multimesh(d.barrier_mesh, d.barrier_mat, barrier_xf))
+	# ---- Detail Pass 1: street clutter density (all MultiMesh) ----
+	# Bollards along both edges of every road, skipped inside
+	# building footprints.
+	var bollard_xf: Array = []
+	for i in range(-2, 3):
+		for k in range(19):
+			var along := -117.0 + k * 13.0
+			for side in [-1.0, 1.0]:
+				if _point_free(i * 52 + side * 6.6, along, 0.3):
+					bollard_xf.append(d.xf(Vector3(i * 52 + side * 6.6, 0.43, along)))
+				if _point_free(along, i * 52 + side * 6.6, 0.3):
+					bollard_xf.append(d.xf(Vector3(along, 0.43, i * 52 + side * 6.6)))
+	parent.add_child(d.make_multimesh(d.bollard_mesh, d.bollard_mat, bollard_xf))
+	# Traffic cones scattered on the road surfaces.
+	var cone_xf: Array = []
+	for i in range(70):
+		var road_i := randi_range(-2, 2) * 52
+		var along := rng.randf_range(-115, 115)
+		var off := rng.randf_range(-4.2, 4.2)
+		if rng.randf() < 0.5:
+			cone_xf.append(d.xf(Vector3(road_i + off, 0.32, along), rng.randf() * TAU))
+		else:
+			cone_xf.append(d.xf(Vector3(along, 0.32, road_i + off), rng.randf() * TAU))
+	parent.add_child(d.make_multimesh(d.cone_mesh, d.cone_mat, cone_xf))
+	# Trash bags on the pads.
+	var bag_xf: Array = []
+	for i in range(90):
+		var px := randi_range(-2, 2) * 52 + rng.randf_range(-19, 19)
+		var pz := randi_range(-2, 2) * 52 + rng.randf_range(-19, 19)
+		if not _point_free(px, pz, 0.7):
+			continue
+		bag_xf.append(d.xf3(Vector3(px, 0.30, pz), rng.randf() * TAU, Vector3(rng.randf_range(0.8, 1.3), rng.randf_range(0.6, 0.85), rng.randf_range(0.8, 1.3))))
+	parent.add_child(d.make_multimesh(d.trashbag_mesh, d.trashbag_mat, bag_xf))
+	# Bushes along pad edges (foliage mesh, small scale).
+	var bush_xf: Array = []
+	for bx in range(-2, 3):
+		for bz in range(-2, 3):
+			for spot in [Vector2(-19, -19), Vector2(19, -19), Vector2(-19, 19), Vector2(19, 19), Vector2(0, -19), Vector2(0, 19), Vector2(-19, 0), Vector2(19, 0)]:
+				if rng.randf() < 0.35:
+					continue
+				var px2: float = bx * 52 + spot.x + rng.randf_range(-1.5, 1.5)
+				var pz2: float = bz * 52 + spot.y + rng.randf_range(-1.5, 1.5)
+				if not _point_free(px2, pz2, 0.9):
+					continue
+				var sc := rng.randf_range(0.35, 0.6)
+				bush_xf.append(d.xf(Vector3(px2, 1.05 * sc + 0.1, pz2), rng.randf() * TAU, sc))
+	parent.add_child(d.make_multimesh(d.foliage_mesh, d.foliage_mat, bush_xf))
+	# Newspaper boxes at cluster corners.
+	var news_xf: Array = []
+	for bx in range(-2, 3):
+		for bz in range(-2, 3):
+			for corner in [Vector2(-21, -21), Vector2(21, -21), Vector2(-21, 21), Vector2(21, 21)]:
+				if rng.randf() < 0.55:
+					continue
+				var px3: float = bx * 52 + corner.x
+				var pz3: float = bz * 52 + corner.y
+				if not _point_free(px3, pz3, 0.8):
+					continue
+				news_xf.append(d.xf(Vector3(px3, 0.48, pz3), rng.randf() * TAU))
+	parent.add_child(d.make_multimesh(d.newsbox_mesh, d.newsbox_mat, news_xf))
+	# Cardboard piles on the pads.
+	var card_xf: Array = []
+	for i in range(50):
+		var px4 := randi_range(-2, 2) * 52 + rng.randf_range(-19, 19)
+		var pz4 := randi_range(-2, 2) * 52 + rng.randf_range(-19, 19)
+		if not _point_free(px4, pz4, 0.8):
+			continue
+		card_xf.append(d.xf(Vector3(px4, 0.12, pz4), rng.randf() * TAU, rng.randf_range(0.8, 1.4)))
+	parent.add_child(d.make_multimesh(d.cardboard_mesh, d.cardboard_mat, card_xf))
 	# Benches near the centre block (bus-stop furniture)
 	var seat_m := BoxMesh.new()
 	seat_m.size = Vector3(1.9, 0.09, 0.5)

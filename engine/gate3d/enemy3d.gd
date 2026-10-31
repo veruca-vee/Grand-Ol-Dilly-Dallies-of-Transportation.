@@ -90,4 +90,5 @@ func _physics_process(delta: float) -> void:
 		fire_cooldown = fire_rate_frames
 	global_position.x = clamp(global_position.x, -115, 115)
 	global_position.z = clamp(global_position.z, -115, 115)
+	tick_walk(delta)
 	tick_flap(delta)

@@ -42,6 +42,12 @@ var ac_mat: StandardMaterial3D
 var antenna_mat: StandardMaterial3D
 var tower_mat: StandardMaterial3D
 var tower_roof_mat: StandardMaterial3D
+# Detail Pass 1 clutter set (all MultiMesh'd by CityBuilder)
+var bollard_mat: StandardMaterial3D
+var cone_mat: StandardMaterial3D
+var trashbag_mat: StandardMaterial3D
+var newsbox_mat: StandardMaterial3D
+var cardboard_mat: StandardMaterial3D
 
 var unit_box: BoxMesh
 var dash_mesh: BoxMesh
@@ -56,6 +62,11 @@ var lamp_head_mesh: BoxMesh     # offset baked via instance transform
 var traffic_mesh: ArrayMesh     # pole + signal box, offsets baked in
 var lens_mesh: SphereMesh
 var crosswalk_mesh: ArrayMesh   # one intersection's 4 zebra sets
+var bollard_mesh: CylinderMesh
+var cone_mesh: CylinderMesh
+var trashbag_mesh: SphereMesh
+var newsbox_mesh: BoxMesh
+var cardboard_mesh: BoxMesh
 
 func _mat(color: Color, rough: float = 1.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -87,7 +98,17 @@ func _speckle(img: Image, rng: RandomNumberGenerator, amount: float, count: int)
 		var d := rng.randf_range(-amount, amount)
 		img.set_pixel(x, y, Color(clampf(c.r + d, 0.0, 1.0), clampf(c.g + d, 0.0, 1.0), clampf(c.b + d, 0.0, 1.0), 1.0))
 
-func _make_facade(base: Color, rng: RandomNumberGenerator) -> ImageTexture:
+# Detail Pass 1: storefront sign accents (Midnight-Circle-adjacent:
+# violet C77DFF, gold FFD479, moonwater 7FDBCA, ember FF5370, herb
+# 82C99A) and the facade base palette, shared with CityBuilder so
+# per-building facades use the same bases as the shared set.
+const SIGN_ACCENTS: Array = [
+	Color(0.78, 0.49, 1.0), Color(1.0, 0.83, 0.47), Color(0.50, 0.86, 0.79),
+	Color(1.0, 0.33, 0.44), Color(0.51, 0.79, 0.60),
+]
+var facade_bases: Array = []
+
+func _make_facade(base: Color, rng: RandomNumberGenerator, lit_ratio: float = 0.28) -> ImageTexture:
 	var img := Image.create(128, 192, false, Image.FORMAT_RGBA8)
 	img.fill(base)
 	_speckle(img, rng, 0.045, 2600)
@@ -102,7 +123,7 @@ func _make_facade(base: Color, rng: RandomNumberGenerator) -> ImageTexture:
 			var wc: Color
 			if r == rows - 1:
 				wc = Color(0.05, 0.07, 0.10)
-			elif rng.randf() < 0.28:
+			elif rng.randf() < lit_ratio:
 				var b := rng.randf_range(0.7, 1.0)
 				wc = Color(1.0 * b, 0.74 * b, 0.40 * b)  # lit window, warm
 			elif rng.randf() < 0.10:
@@ -127,6 +148,7 @@ func _build_textures(rng: RandomNumberGenerator) -> void:
 		Color(0.55, 0.42, 0.35), Color(0.62, 0.55, 0.45), Color(0.45, 0.50, 0.55),
 		Color(0.50, 0.50, 0.42), Color(0.66, 0.58, 0.47), Color(0.40, 0.42, 0.48),
 	]
+	facade_bases = bases
 	for b in bases:
 		var m := StandardMaterial3D.new()
 		m.albedo_texture = _make_facade(b, rng)
@@ -167,6 +189,11 @@ func _build_materials() -> void:
 	antenna_mat = _mat(Color(0.20, 0.20, 0.22), 0.6)
 	tower_mat = _mat(Color(0.42, 0.33, 0.22), 0.95)
 	tower_roof_mat = _mat(Color(0.30, 0.24, 0.16), 0.95)
+	bollard_mat = _mat(Color(0.58, 0.56, 0.48), 0.7)
+	cone_mat = _mat(Color(0.85, 0.40, 0.10), 0.9)
+	trashbag_mat = _mat(Color(0.08, 0.09, 0.11), 0.95)
+	newsbox_mat = _mat(Color(0.20, 0.30, 0.55), 0.6)
+	cardboard_mat = _mat(Color(0.55, 0.42, 0.26), 1.0)
 
 # ---------- Shared meshes ----------
 func _box_mesh(size: Vector3) -> BoxMesh:
@@ -235,6 +262,75 @@ func _build_meshes() -> void:
 			# across the horizontal road, east + west approaches
 			parts.append([unit_box, _t(Vector3(side * 7.6, 0.105, off), Vector3(2.8, 0.03, 1.1))])
 	crosswalk_mesh = _merged(parts)
+	# Detail Pass 1 clutter meshes (cheap on purpose: the density
+	# budget is paid in instances, not triangles)
+	bollard_mesh = CylinderMesh.new()
+	bollard_mesh.top_radius = 0.09
+	bollard_mesh.bottom_radius = 0.11
+	bollard_mesh.height = 0.85
+	bollard_mesh.radial_segments = 7
+	cone_mesh = CylinderMesh.new()
+	cone_mesh.top_radius = 0.03
+	cone_mesh.bottom_radius = 0.17
+	cone_mesh.height = 0.55
+	cone_mesh.radial_segments = 8
+	trashbag_mesh = SphereMesh.new()
+	trashbag_mesh.radius = 0.42
+	trashbag_mesh.height = 0.8
+	trashbag_mesh.radial_segments = 7
+	trashbag_mesh.rings = 4
+	newsbox_mesh = _box_mesh(Vector3(0.55, 0.95, 0.5))
+	cardboard_mesh = _box_mesh(Vector3(0.95, 0.14, 0.7))
+
+# Detail Pass 1: a per-building facade material — unique texture
+# from its own seeded RNG at a per-building lit-window ratio, so
+# no two buildings share a facade (seed) or a lit pattern.
+func make_facade_material(base: Color, seed_value: int, lit_ratio: float) -> StandardMaterial3D:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = _make_facade(base, rng, lit_ratio)
+	m.roughness = 0.95
+	m.texture_repeat = 1  # TEXTURE_REPEAT_ENABLED (see _build_textures)
+	return m
+
+# Detail Pass 1: an emissive storefront sign — generated texture
+# (dark panel, accent border, blocky name-like glyph bars) lit by
+# its own emission so it reads at fog distance.
+func make_sign_material(accent: Color, seed_value: int) -> StandardMaterial3D:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var img := Image.create(256, 64, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.05, 0.04, 0.10))  # void panel
+	img.fill_rect(Rect2i(0, 0, 256, 3), accent)
+	img.fill_rect(Rect2i(0, 61, 256, 3), accent)
+	img.fill_rect(Rect2i(0, 0, 3, 64), accent)
+	img.fill_rect(Rect2i(253, 0, 3, 64), accent)
+	var x := 14
+	for li in range(rng.randi_range(5, 8)):
+		var lw := rng.randi_range(14, 24)
+		var bars := rng.randi_range(2, 4)
+		for b in range(bars):
+			var bx := x + int(float(lw) * float(b) / float(bars))
+			var bw := maxi(3, int(float(lw) / float(bars)) - 3)
+			var bh := rng.randi_range(24, 38)
+			var col := accent if b % 2 == 0 else Color(0.95, 0.93, 0.85)
+			img.fill_rect(Rect2i(bx, 32 - bh / 2, bw, bh), col)
+		if rng.randf() < 0.6:
+			img.fill_rect(Rect2i(x, 29, lw, 5), accent.darkened(0.15))
+		x += lw + rng.randi_range(6, 12)
+		if x > 225:
+			break
+	img.generate_mipmaps()
+	var tex := ImageTexture.create_from_image(img)
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = tex
+	m.roughness = 0.6
+	m.emission_enabled = true
+	m.emission = Color(1, 1, 1)
+	m.emission_texture = tex
+	m.emission_energy_multiplier = 1.35
+	return m
 
 # ---------- MultiMesh builder ----------
 func make_multimesh(mesh: Mesh, mat: Material, transforms: Array) -> MultiMeshInstance3D:
@@ -252,3 +348,7 @@ func make_multimesh(mesh: Mesh, mat: Material, transforms: Array) -> MultiMeshIn
 
 func xf(pos: Vector3, rot_y: float = 0.0, scale: float = 1.0) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, rot_y).scaled(Vector3.ONE * scale), pos)
+
+# Detail Pass 1: non-uniform-scale sibling of xf (squashed bags).
+func xf3(pos: Vector3, rot_y: float, scale: Vector3) -> Transform3D:
+	return Transform3D(Basis(Vector3.UP, rot_y).scaled(scale), pos)

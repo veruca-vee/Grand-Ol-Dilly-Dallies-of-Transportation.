@@ -404,3 +404,115 @@ Smoketest: all four SMOKETEST PASS lines, exit 0 (see above).
 Linux export: `builds/GODOT-Linux/GODOT.x86_64`, 66,222,912 bytes,
 sha256 `9b509c13319b38b9f3d7317cbe398cb22872e35af3bdda3fe66667dc9c312fec`,
 zipped as `builds/GODOT-Linux-EngineCore.zip`.
+
+## Detail Pass 1 — "The street feels inhabited" (2026-10-31)
+
+Spec: `design/DETAIL1_SPEC.md`. Plan + tasks:
+`design/DETAIL1_PLAN.md`. Method: `design/METHOD.md` (spec →
+plan → tasks → per-task TDD → validate & review). All new
+behavior lives in `core/` modules per the core rules; the game
+kept its numbers, data, collision shapes, and save shape.
+
+What shipped:
+
+1. **Walk cycle** (`core/flap_rig.gd`): legs/arms hang from hip/
+   shoulder pivots (box sizes and spans unchanged); `tick_walk`
+   advances `walk_phase` from planar speed (stride 2.4 rad/unit)
+   with an eased blend, so limbs swing ±0.55 (legs) / ∓0.38
+   (arms) while moving and settle to neutral when stopped.
+   Called by Player3D/Ped3D/Enemy3D after `move_and_slide()`.
+   Head, hinge pivot, eyes, cap: code untouched — proportions
+   identical, guarded by autotest checks on pivot height and
+   upper-head child count.
+2. **Car variants** (`gate3d/car3d.gd`): 3 silhouettes (sedan =
+   previous geometry verbatim, hatchback, van) from `body_style`,
+   a 10-colour `PALETTE`, wheel spin ∝ speed (pre-existing,
+   now contract-locked). Collision shape identical per style.
+3. **Signage + facades** (`core/city_dressing.gd`,
+   `core/city_builder.gd`): generated emissive sign textures
+   (dark panel, accent border, blocky glyph bars) in 5 accents;
+   ~20 signs mounted on storefront faces. Every building gets a
+   UNIQUE facade seed and its own lit-window ratio in
+   [0.08, 0.50] (spec asked for adjacent-difference; unique is
+   stronger).
+4. **Density**: bollards, cones, trash bags, bushes, newspaper
+   boxes, cardboard — all MultiMesh — plus denser trees, crates,
+   streetlights. Props remain non-colliding dressing.
+
+### TDD evidence
+
+Baseline before changes: nodes 714, MultiMesh instances 623 →
+spec targets: instances ≥ 1246, nodes < 900.
+
+RED (autotest section 8 written first, run before any
+implementation — the 3 pre-existing contract lines all passed;
+these 12 failed):
+
+```
+AUTOTEST FAIL: walk_cycle: player has no walk_phase (walk API missing)
+AUTOTEST FAIL: walk_cycle: max limb swing 0.00 rad while walking, expected > 0.15
+AUTOTEST FAIL: walk_cycle: swing did not settle when stopped (walk_swing=<null> after 40 idle frames)
+AUTOTEST FAIL: walk_cycle: a wandering ped's walk_phase did not advance
+AUTOTEST FAIL: walk_cycle: chasing enemy's walk_phase did not advance
+AUTOTEST FAIL: car_variants: 0 distinct body_style values across spawned cars, expected >= 3
+AUTOTEST FAIL: car_variants: cars expose no paint palette, expected >= 8 colours
+AUTOTEST FAIL: signage: sign_count is <null>, expected >= 12
+AUTOTEST FAIL: signage: 0 distinct sign accent colours, expected >= 4
+AUTOTEST FAIL: signage: facade seed registry has none entries, expected >= 20 buildings
+AUTOTEST FAIL: signage: only 0 distinct lit-window ratios, expected >= 10 (variance)
+AUTOTEST FAIL: density_budget: 622 MultiMesh instances, expected >= 1246 (2x the 623 baseline)
+```
+
+GREEN (after T2–T5, and identically after the T6 refactor):
+
+```
+AUTOTEST PASS: smg_ped_kill cash+score+combo | smg_cop_damage+kill | wanted_floor caps spawn_types | driveby_cooldown_ticks
+AUTOTEST PASS: upgrade_purchase cost_scaling effects | save_load_roundtrip
+AUTOTEST PASS: wasd_camera_relative
+AUTOTEST PASS: detail1 walk_cycle car_variants signage density_budget
+```
+
+One test-design fix, documented rather than hidden: the ped
+walk check first re-enabled a parked ped from the 8-body pile
+at (100,100). A probe run showed that ped depenetrating on top
+of the pile (y 0.2 → 1.86, planar velocity 0) — it never walks,
+so the check was testing pile physics, not the walk cycle. The
+check now spawns a fresh wandering ped in open space; the
+contract it verifies is unchanged.
+
+### Validate & review (2026-10-31, this VM, Godot 4.3)
+
+- Xvfb screenshot (1280×720) framed on sign #1 via the
+  `--screenshot` debug path; PIL pixel check (every 2nd pixel):
+  the sign's accent **violet C77DFF present at 1,536 sampled
+  pixels** (≈6,100 actual), warm-white glyph pixels 549, void
+  panel pixels 917. Sign texture structure confirmed visually
+  in the data.
+- Scene census: **nodes = 796** (< 900), **MultiMesh
+  instances ≈ 1,320** (2.1× the 623 baseline; ±3 run to run
+  from RNG prop placement).
+- 1200-frame headless run: exit 0, **zero script errors** (419
+  "Parameter m is null" headless artifacts, counted, same known
+  artifact as prior gates).
+- Smoketest: all four SMOKETEST PASS lines.
+- Edge cases reviewed: **save compat** — no save fields touched;
+  the save/load roundtrip contract passes unchanged, and visual
+  state (car style, walk phase) is per-run/per-instance, never
+  persisted. **BUSTED** — scene reload builds fresh rigs; walk
+  state is instance state (no statics), and dead characters stop
+  ticking (limbs freeze with the tip-over, as before).
+  **Tank** — extends CharacterBody3D directly, no FlapRig, so
+  the walk cycle does not touch it; spawn/drive contracts pass.
+  **Firing while walking** — limb swing lives on child pivots
+  (local X), the flap on the head hinge, aim on the body root;
+  three independent axes, no interference by construction.
+- Linux export: `builds/GODOT-Linux/GODOT.x86_64`, 66,236,736
+  bytes, sha256
+  `7330805412eb30348bbda4cf0825fcb4f2d0a2c809a5b473ecbaf7295208ec26`.
+  In the exported binary: 300 frames clean, all four AUTOTEST
+  PASS lines, all four SMOKETEST PASS lines. Zip:
+  `builds/GODOT-Linux-Detail1.zip` (24,322,175 bytes, sha256
+  `a39b7b14e0fc3bb5e33b3ceb765f525542f309962b9432d5e607218c302b0f34`).
+- Visual quality on real hardware (iwantitnow, Celeron UHD
+  600): **[unverified]** until Vee runs this build — headless
+  and Xvfb checks prove structure and pixels, not game feel.

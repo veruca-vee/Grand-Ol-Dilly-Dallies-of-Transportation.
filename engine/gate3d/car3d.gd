@@ -7,6 +7,17 @@ extends CharacterBody3D
 # destruction, economy and wanted live in gate3d_main.kill_car.
 
 var car_color: Color = Color(0.75, 0.25, 0.25)
+# Detail Pass 1: paint palette + body silhouettes. body_style is
+# set by the spawner BEFORE add_child; _ready builds that body.
+# paint_colors mirrors PALETTE per-instance as a test seam.
+const PALETTE: Array = [
+	Color(0.75, 0.25, 0.25), Color(0.25, 0.35, 0.8), Color(0.3, 0.65, 0.3),
+	Color(0.8, 0.7, 0.2), Color(0.55, 0.57, 0.62), Color(0.45, 0.2, 0.55),
+	Color(0.12, 0.12, 0.14), Color(0.85, 0.83, 0.78), Color(0.85, 0.45, 0.15),
+	Color(0.15, 0.55, 0.60),
+]
+var paint_colors: Array = []
+var body_style: int = 0  # 0 sedan, 1 hatchback, 2 van
 var speed: float = 0.0
 var max_speed: float = 24.0
 var accel: float = 14.0
@@ -64,20 +75,43 @@ func _ready() -> void:
 	shape.shape = box
 	shape.position = Vector3(0, 0.6, 0)
 	add_child(shape)
+	paint_colors = PALETTE
 	# Gate 3D-2 dressed body: paint lower body + glass cabin + paint
 	# roof panel + bumpers, instead of Gate 3D-0's plain boxes.
-	body_meshes.append(_box(Vector3(1.8, 0.5, 4.0), Vector3(0, 0.55, 0), car_color))
-	_box(Vector3(1.84, 0.16, 4.04), Vector3(0, 0.30, 0), car_color.darkened(0.30))  # lower trim
+	# Detail Pass 1: three silhouettes share the chassis, wheels
+	# and collision shape; only body/cabin geometry differs.
+	var body_size := Vector3(1.8, 0.5, 4.0)
+	var body_y := 0.55
+	var cabin_size := Vector3(1.58, 0.48, 2.0)
+	var cabin_pos := Vector3(0, 1.04, 0.15)
+	var roof_size := Vector3(1.64, 0.09, 2.06)
+	var roof_pos := Vector3(0, 1.32, 0.15)
+	if body_style == 1:  # hatchback: shorter body, taller rear cabin
+		body_size = Vector3(1.78, 0.52, 3.3)
+		cabin_size = Vector3(1.56, 0.55, 1.9)
+		cabin_pos = Vector3(0, 1.08, 0.35)
+		roof_size = Vector3(1.62, 0.09, 1.96)
+		roof_pos = Vector3(0, 1.40, 0.35)
+	elif body_style == 2:  # van: tall slab body, long glass cabin
+		body_size = Vector3(1.86, 0.95, 4.1)
+		body_y = 0.72
+		cabin_size = Vector3(1.70, 0.62, 3.1)
+		cabin_pos = Vector3(0, 1.30, -0.2)
+		roof_size = Vector3(1.80, 0.09, 3.4)
+		roof_pos = Vector3(0, 1.65, -0.2)
+	body_meshes.append(_box(body_size, Vector3(0, body_y, 0), car_color))
+	_box(Vector3(body_size.x + 0.04, 0.16, body_size.z + 0.04), Vector3(0, body_y - 0.25, 0), car_color.darkened(0.30))  # lower trim
 	var cabin := MeshInstance3D.new()
 	var cbm := BoxMesh.new()
-	cbm.size = Vector3(1.58, 0.48, 2.0)
+	cbm.size = cabin_size
 	cabin.mesh = cbm
-	cabin.position = Vector3(0, 1.04, 0.15)
+	cabin.position = cabin_pos
 	cabin.material_override = _glass_mat()
 	add_child(cabin)
-	body_meshes.append(_box(Vector3(1.64, 0.09, 2.06), Vector3(0, 1.32, 0.15), car_color.darkened(0.08)))  # roof
-	_box(Vector3(1.86, 0.18, 0.25), Vector3(0, 0.42, -2.02), Color(0.12, 0.12, 0.13))  # bumpers
-	_box(Vector3(1.86, 0.18, 0.25), Vector3(0, 0.42, 2.02), Color(0.12, 0.12, 0.13))
+	body_meshes.append(_box(roof_size, roof_pos, car_color.darkened(0.08)))  # roof
+	var bumper_z := body_size.z / 2.0 + 0.02
+	_box(Vector3(1.86, 0.18, 0.25), Vector3(0, 0.42, -bumper_z), Color(0.12, 0.12, 0.13))  # bumpers
+	_box(Vector3(1.86, 0.18, 0.25), Vector3(0, 0.42, bumper_z), Color(0.12, 0.12, 0.13))
 	# wheels: steer pivot -> spin node -> tyre + hubcap (front = -Z)
 	var tyre_mat := _mat(Color(0.05, 0.05, 0.05))
 	var hub_mat := _mat(Color(0.55, 0.56, 0.60))
@@ -117,9 +151,9 @@ func _ready() -> void:
 	var hl := _light_mat(Color(1.0, 0.95, 0.70))
 	var tl := _light_mat(Color(1.0, 0.15, 0.15))
 	for sx in [-1.0, 1.0]:
-		var h := _box(Vector3(0.32, 0.12, 0.06), Vector3(sx * 0.58, 0.64, -2.03), Color.WHITE)
+		var h := _box(Vector3(0.32, 0.12, 0.06), Vector3(sx * 0.58, 0.64, -bumper_z - 0.01), Color.WHITE)
 		h.material_override = hl
-		var t := _box(Vector3(0.32, 0.12, 0.06), Vector3(sx * 0.58, 0.64, 2.03), Color.WHITE)
+		var t := _box(Vector3(0.32, 0.12, 0.06), Vector3(sx * 0.58, 0.64, bumper_z + 0.01), Color.WHITE)
 		t.material_override = tl
 
 func take_damage(amt: float) -> void:

@@ -77,4 +77,5 @@ func _physics_process(delta: float) -> void:
 		target_dir = -target_dir
 	global_position.x = clamp(global_position.x, -110, 110)
 	global_position.z = clamp(global_position.z, -110, 110)
+	tick_walk(delta)
 	tick_flap(delta)
