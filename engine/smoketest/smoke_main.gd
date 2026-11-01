@@ -202,6 +202,61 @@ func _run() -> void:
 	if bonus_ok:
 		print("SMOKETEST PASS: wanted_floor save_roundtrip flap_rig sfx_synth")
 
+	# --- TELEMETRY: core DebugLog standalone in a bare scene,
+	# its own temp dir (the port test for the logger). Reached
+	# via a load() seam so a missing module is an assertion
+	# failure, not a parse error. ---
+	var tele_ok := true
+	var DL = load("res://core/debug_log.gd")
+	if DL == null:
+		tele_ok = false
+		fails.append("telemetry: res://core/debug_log.gd missing")
+	else:
+		var tdir := "user://smoketest_telemetry"
+		var tg := ProjectSettings.globalize_path(tdir)
+		var d0 := DirAccess.open(tdir)
+		if d0 != null:
+			for fn in d0.get_files():
+				DirAccess.remove_absolute(tg + "/" + fn)
+		if DirAccess.dir_exists_absolute(tg):
+			DirAccess.remove_absolute(tg)
+		var dl = DL.new()
+		if not dl.start_session(tdir, "SMOKETEST"):
+			tele_ok = false
+			fails.append("telemetry: start_session failed in a temp dir")
+		else:
+			dl._test_now = 0.5
+			dl.snapshot({"pos": Vector3(2.0, 0.2, 5.0), "vy": 0.0, "fps": 60, "wanted": 0.0, "in_car": false, "hp": 100.0, "cash": 7})
+			dl.event("PING", {"n": 1})
+			var ttxt := FileAccess.get_file_as_string(dl.session_path)
+			if not ttxt.contains("build=SMOKETEST"):
+				tele_ok = false
+				fails.append("telemetry: header lacks build=SMOKETEST")
+			if not ttxt.contains("t=0.50 SNAPSHOT pos=2.00,0.20,5.00"):
+				tele_ok = false
+				fails.append("telemetry: snapshot line missing/misformatted")
+			if not ttxt.contains("EVENT PING") or not ttxt.contains("n=1"):
+				tele_ok = false
+				fails.append("telemetry: event line missing/misformatted")
+			dl.frame_cap = 2
+			var timg := Image.create(4, 4, false, Image.FORMAT_RGB8)
+			timg.fill(Color(0.1, 0.8, 0.3))
+			for ft in [1.0, 2.0, 3.0]:
+				dl._test_now = ft
+				dl.capture_frame(timg)
+			if dl.frames.size() != 2:
+				tele_ok = false
+				fails.append("telemetry: rotation kept %d frames, expected cap 2" % dl.frames.size())
+			dl.end_session()
+		var d1 := DirAccess.open(tdir)
+		if d1 != null:
+			for fn in d1.get_files():
+				DirAccess.remove_absolute(tg + "/" + fn)
+		if DirAccess.dir_exists_absolute(tg):
+			DirAccess.remove_absolute(tg)
+	if tele_ok:
+		print("SMOKETEST PASS: telemetry debug_log")
+
 	for f in fails:
 		print("SMOKETEST FAIL: ", f)
 	get_tree().quit(0 if fails.is_empty() else 1)

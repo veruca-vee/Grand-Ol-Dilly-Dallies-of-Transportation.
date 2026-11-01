@@ -62,6 +62,11 @@ var cars_destroyed: int = 0
 # forward to it so game code keeps the old names.
 var wanted_sys := Wanted.new()
 var combat := Combat.new()
+# Live wanted gains, from the data's wanted.gains block (the
+# wanted_pacing fix, 2026-11-01: the HTML gains in gains_in_html
+# stay as the historical record; these are the tuned 3D values).
+# Fallbacks in the kill paths are the HTML numbers.
+var wanted_gains: Dictionary = {}
 var wanted_level: float:
 	get:
 		return wanted_sys.level
@@ -121,6 +126,15 @@ var sfx_players: Array[AudioStreamPlayer] = []
 var last_hurt_sfx_frame: int = -100
 var last_boom_sfx_frame: int = -100
 
+# ---------- Playtest telemetry (TELEMETRY_SPEC) ----------
+# The logger is ENGINE CORE (core/debug_log.gd); this layer
+# picks the directory + build label and feeds it state and
+# events. Local files only — nothing leaves the machine.
+const BUILD_LABEL := "Detail1+Telemetry"
+var debug_log: DebugLog = null
+var telemetry_dir: String = "user://playtest"
+var last_wanted_stars: int = 0
+
 func _mat(color: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = color
@@ -136,12 +150,27 @@ func _ready() -> void:
 		save_path = SAVE_PATH_TEST
 		if FileAccess.file_exists(save_path):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path))
+	# Playtest telemetry: session starts before anything can
+	# happen worth logging. A failed start disables the logger
+	# silently (core rule) — the game runs identically either
+	# way. Autotest sessions go to their own dir, like the save.
+	debug_log = DebugLog.new()
+	telemetry_dir = "user://playtest"
+	var env_dir := OS.get_environment("GODOT_TELEMETRY_DIR")
+	if env_dir != "":
+		telemetry_dir = env_dir
+	if autotest:
+		telemetry_dir = "user://playtest_autotest"
+	debug_log.frame_provider = _telemetry_grab_frame
+	if debug_log.start_session(telemetry_dir, BUILD_LABEL):
+		debug_log.event("SESSION_START", {"build": BUILD_LABEL})
 	data = DataLoader.load_json("res://data/enemies_world_wanted.json")
 	weapons = DataLoader.load_array("res://data/weapons.json", "weapons")
 	driveby_weapon = DataLoader.load_json("res://data/weapons.json").get("driveby_weapon", {})
 	for e in data.get("enemies", []):
 		enemy_stats[e.get("type", "")] = e
 	wanted_cfg = data.get("wanted", {})
+	wanted_gains = wanted_cfg.get("gains", {})
 	car_stats = data.get("car", {})
 	ped_stats = data.get("pedestrian", {})
 	base_hp_data = float(data.get("player", {}).get("base_hp", 100))
@@ -279,7 +308,7 @@ func _build_hud() -> void:
 	layer.add_child(hud_cash)
 	hud_stars = HudKit.make_label("", Vector2(1020, 34), 20, Color(1.0, 0.83, 0.47))
 	layer.add_child(hud_stars)
-	var help := HudKit.make_label("WASD move/drive · mouse aims · LMB fire · 1-9 / Q weapons · E enter/exit car · B black market · hold T to talk", Vector2(10, 660), 14)
+	var help := HudKit.make_label("WASD move/drive · mouse aims · LMB fire · 1-9 / Q weapons · E enter/exit car · B black market · hold T to talk · F9 mark a moment", Vector2(10, 660), 14)
 	layer.add_child(help)
 	var cross := Label.new()
 	cross.set_anchors_preset(Control.PRESET_CENTER)
@@ -415,6 +444,7 @@ func buy_upgrade(uid: String) -> bool:
 	cash -= cost
 	upgrades.record_purchase(uid)
 	apply_upgrades()
+	_telemetry_event("UPGRADE", {"id": uid, "level": upgrade_level(uid), "cost": cost})
 	save_game()
 	play_sfx("pickup", -10.0)
 	refresh_hud()
@@ -497,6 +527,7 @@ func refresh_hud() -> void:
 # ---------- Wanted / combo (mirrors scripts/main.gd) ----------
 func add_wanted(amt: float) -> void:
 	wanted_sys.add(amt)
+	_telemetry_wanted_check()
 	refresh_hud()
 
 func add_combo() -> float:
@@ -707,7 +738,7 @@ func kill_ped(p: Ped3D, run_over: bool) -> void:
 	var mult := add_combo()
 	var base := float(ped_stats.get("cash_runover", 15) if run_over else ped_stats.get("cash_on_kill", 10))
 	economy.award(base, float(ped_stats.get("score", 20)), mult)
-	add_wanted(0.15)
+	add_wanted(float(wanted_gains.get("kill_ped_runover" if run_over else "kill_ped", 0.15)))
 	spawn_pickup_3d(p.global_position, "cash")
 	refresh_hud()
 
@@ -718,7 +749,7 @@ func kill_car(c: Car3D) -> void:
 	c.speed = 0.0
 	c.set_dead_visual()
 	cars_destroyed += 1
-	add_wanted(0.3)
+	add_wanted(float(wanted_gains.get("destroy_car", 0.3)))
 	var mult := add_combo()
 	economy.award(float(car_stats.get("cash_on_destroy", 25)), float(car_stats.get("score", 50)), mult)
 	if player != null and player.driving == c:
@@ -737,7 +768,7 @@ func kill_enemy(e: Node3D) -> void:
 		return
 	e.dead = true
 	kills += 1
-	add_wanted(0.1)
+	add_wanted(float(wanted_gains.get("kill_enemy", 0.1)))
 	var mult := add_combo()
 	var stats: Dictionary = enemy_stats.get(e.kind, {})
 	economy.award(float(stats.get("cash_on_kill", 20)), float(stats.get("score", 100)), mult)
@@ -773,6 +804,9 @@ func on_player_death() -> void:
 	if state != "PLAYING":
 		return
 	state = "GAMEOVER"
+	_telemetry_event("BUSTED", {"score": score, "cash": cash})
+	if debug_log != null:
+		debug_log.capture_now()
 	player.dead = true
 	if player.driving != null:
 		_exit_car()
@@ -798,6 +832,7 @@ func _try_enter_car() -> void:
 	if best != null:
 		player.driving = best
 		best.driven = true
+		_telemetry_event("CAR_ENTER", {})
 		player.visible = false
 		player.set_physics_process(false)
 		if player.body_shape != null:
@@ -805,6 +840,7 @@ func _try_enter_car() -> void:
 		refresh_hud()
 
 func _exit_car() -> void:
+	_telemetry_event("CAR_EXIT", {})
 	var car := player.driving
 	car.driven = false
 	player.driving = null
@@ -817,6 +853,12 @@ func _exit_car() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
+		# Telemetry: F9 is Vee's "it broke right here" button —
+		# a MARKER line plus a forced frame in the session log.
+		if event.keycode == KEY_F9:
+			if debug_log != null:
+				debug_log.marker()
+			return
 		# Gate 3D-2: Black Market keys take over while the shop is open
 		if shop_open:
 			if event.keycode == KEY_B or event.keycode == KEY_ESCAPE:
@@ -873,6 +915,7 @@ func _physics_process(_delta: float) -> void:
 	if wanted_level > 0.0:
 		if wanted_sys.tick():
 			refresh_hud()
+		_telemetry_wanted_check()
 		if not autotest:
 			try_spawn_enemy()
 	# run-overs by the driven car (2D: any car moving fast; in the 3D
@@ -897,6 +940,10 @@ func _physics_process(_delta: float) -> void:
 						unlocked_weapons.append(player.weapon_index)
 			else:
 				economy.add_cash(15)
+			var pk_data := {"kind": pk.kind}
+			if pk.kind == "weapon":
+				pk_data["weapon"] = str(weapons[player.weapon_index].get("name", ""))
+			_telemetry_event("PICKUP", pk_data)
 			pk.queue_free()
 			refresh_hud()
 	refresh_hud()
@@ -905,6 +952,11 @@ func _process(delta: float) -> void:
 	if shop_open:
 		return
 	_update_fx(delta)
+	# Telemetry ticks even under --autotest (the autotest drives
+	# this by hand to prove the wiring); the follow camera below
+	# stays disabled there, as before.
+	if debug_log != null and state == "PLAYING":
+		debug_log.tick(delta, _telemetry_state())
 	if player == null or camera == null or autotest:
 		return
 	var actor: Node3D = player.driving if player.driving != null else player
@@ -981,6 +1033,66 @@ func _update_fx(delta: float) -> void:
 		var mat := node.material_override as StandardMaterial3D
 		if mat != null:
 			mat.albedo_color.a = 0.85 * frac if grow == 0.0 else 0.75 * frac
+
+# ---------- Telemetry feeds (game side of core DebugLog) ----------
+func _telemetry_grab_frame() -> Image:
+	# The frame provider: the live viewport. Under a headless
+	# dummy renderer this yields an empty image, which
+	# DebugLog.capture_frame refuses — real pixels are proven
+	# under Xvfb (see the gate notes).
+	var tex := get_viewport().get_texture()
+	if tex == null:
+		return null
+	return tex.get_image()
+
+func _telemetry_state() -> Dictionary:
+	var pos := Vector3.ZERO
+	var vy := 0.0
+	var hp_now := 0.0
+	var in_car := false
+	if player != null:
+		pos = player.global_position
+		vy = player.velocity.y
+		hp_now = player.hp
+		if player.driving != null:
+			in_car = true
+			vy = player.driving.velocity.y
+	return {
+		"pos": pos, "vy": vy,
+		"fps": int(Performance.get_monitor(Performance.TIME_FPS)),
+		"wanted": wanted_level, "in_car": in_car,
+		"hp": hp_now, "cash": cash,
+	}
+
+func _telemetry_event(event_name: String, data: Dictionary = {}) -> void:
+	if debug_log != null:
+		debug_log.event(event_name, data)
+
+func _telemetry_wanted_check() -> void:
+	if debug_log == null:
+		return
+	var s := floori(wanted_level)
+	if s != last_wanted_stars:
+		debug_log.event("WANTED", {"from": last_wanted_stars, "to": s, "level": wanted_level})
+		last_wanted_stars = s
+
+# ---------- Autotest helpers (telemetry section) ----------
+func _telemetry_test_files(dir_path: String) -> Array:
+	var out: Array = []
+	var d := DirAccess.open(dir_path)
+	if d != null:
+		for fn in d.get_files():
+			out.append(fn)
+	return out
+
+func _telemetry_test_wipe(dir_path: String) -> void:
+	var g := ProjectSettings.globalize_path(dir_path)
+	var d := DirAccess.open(dir_path)
+	if d != null:
+		for fn in d.get_files():
+			DirAccess.remove_absolute(g + "/" + fn)
+	if DirAccess.dir_exists_absolute(g):
+		DirAccess.remove_absolute(g)
 
 # ---------- Autotest (--autotest) ----------
 func _run_autotest() -> void:
@@ -1380,6 +1492,162 @@ func _run_autotest() -> void:
 		if off_cw > 0:
 			fails5.append("markings_on_roads: %d of %d crosswalk stripes are not on asphalt or an intersection box (first at %s)" % [off_cw, (cw_v as Array).size(), str(first_cw)])
 
+	# --- 10. Playtest telemetry (TELEMETRY_SPEC): DebugLog core
+	# contract + the game's wiring. The logger is reached through
+	# a load() seam and the game's logger through a get() duck
+	# seam, so a missing module/wiring fails as assertions, not
+	# a parse error (the Detail-1 precedent).
+	var fails6: Array[String] = []
+	var DL = load("res://core/debug_log.gd")
+	if DL == null:
+		fails6.append("telemetry_log: res://core/debug_log.gd is missing")
+	else:
+		var tdir := "user://telemetry_autotest_unit"
+		_telemetry_test_wipe(tdir)
+		var dl = DL.new()
+		var snap_state := {"pos": Vector3(1.5, 0.2, -3.0), "vy": -0.5, "fps": 60, "wanted": 1.4, "in_car": true, "hp": 87.5, "cash": 42}
+		if not dl.start_session(tdir, "AUTOTEST"):
+			fails6.append("telemetry_log: start_session failed in a writable temp dir")
+		else:
+			var txt := FileAccess.get_file_as_string(dl.session_path)
+			var first_nl := txt.find("\n")
+			var header := txt.substr(0, first_nl) if first_nl >= 0 else txt
+			if not header.begins_with("# GODOT-TELEMETRY"):
+				fails6.append("telemetry_log: session header is '%s', expected a # GODOT-TELEMETRY line" % header)
+			if not header.contains("build=AUTOTEST"):
+				fails6.append("telemetry_log: header lacks the build label")
+			dl._test_now = 1.25
+			dl.snapshot(snap_state)
+			dl.event("TEST_EVENT", {"k": 7, "word": "yes"})
+			txt = FileAccess.get_file_as_string(dl.session_path)
+			if not txt.contains("t=1.25 SNAPSHOT pos=1.50,0.20,-3.00"):
+				fails6.append("telemetry_log: snapshot line missing or misformatted")
+			for frag in ["vy=-0.50", "fps=60", "wanted=1.40", "in_car=true", "hp=87.5", "cash=42"]:
+				if not txt.contains(frag):
+					fails6.append("telemetry_log: snapshot line lacks %s" % frag)
+			if not txt.contains("t=1.25 EVENT TEST_EVENT") or not txt.contains("k=7") or not txt.contains("word=yes"):
+				fails6.append("telemetry_log: event line missing or misformatted")
+			# core owns the timing: tick() accumulates to the
+			# snapshot interval before writing the next snapshot
+			var snaps_before: int = txt.count("SNAPSHOT")
+			dl._test_now = 3.0
+			dl.tick(0.3, snap_state)
+			txt = FileAccess.get_file_as_string(dl.session_path)
+			if txt.count("SNAPSHOT") != snaps_before:
+				fails6.append("telemetry_log: tick(0.3) wrote a snapshot before the 0.5 s interval")
+			dl.tick(0.3, snap_state)
+			txt = FileAccess.get_file_as_string(dl.session_path)
+			if txt.count("SNAPSHOT") != snaps_before + 1 or not txt.contains("t=3.00 SNAPSHOT"):
+				fails6.append("telemetry_log: tick() did not emit exactly one snapshot at the interval")
+			# marker: MARKER event + a forced frame via the provider
+			var cap_img := Image.create(8, 8, false, Image.FORMAT_RGB8)
+			cap_img.fill(Color(0.9, 0.2, 0.2))
+			dl.frame_provider = func() -> Image: return cap_img
+			dl._test_now = 20.0
+			dl.marker()
+			txt = FileAccess.get_file_as_string(dl.session_path)
+			if not txt.contains("t=20.00 EVENT MARKER"):
+				fails6.append("telemetry_log: marker() wrote no MARKER event")
+			if dl.frames.size() != 1 or not str(dl.frames[0]).ends_with("frame-20.00.png"):
+				fails6.append("telemetry_log: marker() kept frames %s, expected one frame-20.00.png" % str(dl.frames))
+			# an empty image is refused (headless safety)
+			if dl.capture_frame(Image.new()):
+				fails6.append("telemetry_log: capture_frame accepted an empty image")
+			# rotation: past the cap, the oldest frames are deleted
+			dl.frame_cap = 3
+			for ft in [30.0, 31.0, 32.0, 33.0]:
+				dl._test_now = ft
+				if not dl.capture_frame(cap_img):
+					fails6.append("telemetry_log: capture_frame refused a real image at t=%.0f" % ft)
+			if dl.frames.size() != 3:
+				fails6.append("telemetry_log: rotation kept %d frames, expected the cap of 3" % dl.frames.size())
+			if FileAccess.file_exists(tdir + "/frame-20.00.png"):
+				fails6.append("telemetry_log: rotation did not delete the oldest frame file")
+			if not FileAccess.file_exists(tdir + "/frame-33.00.png"):
+				fails6.append("telemetry_log: newest frame file frame-33.00.png missing")
+			dl.end_session()
+		_telemetry_test_wipe(tdir)
+	# wiring: the game itself started a session at _ready, ticks
+	# snapshots from _process, and logs its real events
+	var gdl = get("debug_log")
+	if gdl == null:
+		fails6.append("telemetry_log: game has no debug_log (telemetry not wired)")
+	else:
+		var gpath: String = gdl.session_path
+		if gpath == "" or not FileAccess.file_exists(gpath):
+			fails6.append("telemetry_log: game session file does not exist")
+		else:
+			var gtxt := FileAccess.get_file_as_string(gpath)
+			if not gtxt.contains("build=Detail1+Telemetry"):
+				fails6.append("telemetry_log: game session header lacks build=Detail1+Telemetry")
+			_process(0.6)
+			_process(0.6)
+			gtxt = FileAccess.get_file_as_string(gpath)
+			if not gtxt.contains("SNAPSHOT") or not gtxt.contains("pos="):
+				fails6.append("telemetry_log: game _process ticking wrote no snapshot")
+			var f9 := InputEventKey.new()
+			f9.keycode = KEY_F9
+			f9.pressed = true
+			_input(f9)
+			gtxt = FileAccess.get_file_as_string(gpath)
+			if not gtxt.contains("EVENT MARKER"):
+				fails6.append("telemetry_log: F9 produced no MARKER event in the game session")
+			# BUSTED is the last wiring check: it reloads the
+			# scene on a 2.5 s timer, and the prints + quit below
+			# land well before that fires.
+			on_player_death()
+			gtxt = FileAccess.get_file_as_string(gpath)
+			if not gtxt.contains("EVENT BUSTED"):
+				fails6.append("telemetry_log: player death wrote no BUSTED event")
+			if FileAccess.file_exists(save_path):
+				DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path))
+
+	# --- 11. Wanted pacing (2026-11-01, Vee's real playtest:
+	# many ped kills, never a star, never a cop) ---
+	# The realistic chain the older sections never exercised:
+	# kills minutes apart with wanted ticking in between (they
+	# injected add_wanted(1.4) directly). Contract: three ped
+	# kills through the REAL kill_ped path, each followed by 300
+	# crime-free frames (5 s at 60 fps), must reach a star; from
+	# that state a forced spawn must actually produce a cop; and
+	# one decay step must be PARTIAL (the data's decay_step),
+	# not a whole star.
+	var fails7: Array[String] = []
+	for e in enemies.duplicate():
+		e.queue_free()
+	enemies.clear()
+	wanted_level = 0.0
+	frames_since_crime = 0
+	for k in range(3):
+		var wp := Ped3D.new()
+		wp.main = self
+		add_child(wp)
+		wp.set_physics_process(false)
+		wp.global_position = Vector3(90, 0.2, 90 + k * 3)
+		kill_ped(wp, false)
+		if not wp.dead:
+			fails7.append("wanted_pacing: kill_ped #%d did not kill the ped" % (k + 1))
+		for i in range(300):
+			wanted_sys.tick()
+	if stars_now() < 1:
+		fails7.append("wanted_pacing: 3 ped kills 300 frames apart gave level %.2f (%d stars), expected >= 1 star" % [wanted_level, stars_now()])
+	var enemies_before := enemies.size()
+	if not try_spawn_enemy(true):
+		fails7.append("wanted_pacing: try_spawn_enemy(true) at %d stars (level %.2f) spawned nothing" % [stars_now(), wanted_level])
+	elif enemies.size() != enemies_before + 1:
+		fails7.append("wanted_pacing: forced spawn added %d enemies, expected 1" % (enemies.size() - enemies_before))
+	elif enemies[enemies.size() - 1].kind != "cop":
+		fails7.append("wanted_pacing: first spawn at 1 star is %s, expected cop" % enemies[enemies.size() - 1].kind)
+	# decay: 1.2 set via adds, then 601 crime-free frames must
+	# cost exactly one decay_step (~0.25), landing at ~0.95
+	wanted_level = 0.0
+	frames_since_crime = 0
+	add_wanted(1.2)
+	for i in range(601):
+		wanted_sys.tick()
+	if absf(wanted_level - 0.95) > 0.01:
+		fails7.append("wanted_pacing: decay from 1.20 after 601 crime-free frames gave %.2f, expected ~0.95 (one partial decay_step)" % wanted_level)
+
 	if fails.is_empty():
 		print("AUTOTEST PASS: smg_ped_kill cash+score+combo | smg_cop_damage+kill | wanted_floor caps spawn_types | driveby_cooldown_ticks")
 	else:
@@ -1405,4 +1673,14 @@ func _run_autotest() -> void:
 	else:
 		for f in fails5:
 			print("AUTOTEST FAIL: ", f)
-	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() else 1)
+	if fails6.is_empty():
+		print("AUTOTEST PASS: telemetry_log session snapshots events frames marker wiring")
+	else:
+		for f in fails6:
+			print("AUTOTEST FAIL: ", f)
+	if fails7.is_empty():
+		print("AUTOTEST PASS: wanted_pacing ped_chain_star cop_spawn decay_partial")
+	else:
+		for f in fails7:
+			print("AUTOTEST FAIL: ", f)
+	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() and fails6.is_empty() and fails7.is_empty() else 1)

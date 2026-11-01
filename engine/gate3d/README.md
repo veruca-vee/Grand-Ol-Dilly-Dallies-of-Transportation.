@@ -592,3 +592,213 @@ Zip: `builds/GODOT-Linux-Detail1-markfix.zip` (24,325,845 bytes,
 sha256 `3fad94f82fb035592b3c9a8a26d8f71bcecfc804cfb000faee4cc253307e63b1`).
 Markings look on real hardware: **[unverified]** until Vee runs
 this build — same rule as always.
+
+## Playtest Telemetry (2026-11-01, Vee's request)
+
+Vee, mid-playtest: **"we should add a live debug log and
+screenshot/parser for when I play so you can see all the things
+that break or work."** Spec: `design/TELEMETRY_SPEC.md`; plan +
+tasks: `design/TELEMETRY_PLAN.md`. Built under METHOD.md —
+tests first, red recorded, then green, then refactor.
+
+**What's in:**
+
+- **`core/debug_log.gd` (`DebugLog`, engine core)** — a
+  RefCounted session logger, game-agnostic like Economy/
+  Wanted: the game passes a directory + build label and feeds
+  it snapshot dicts and events; the logger owns the files,
+  the timing and the frame rotation. Intervals/caps are
+  engine defaults on the module (snapshot 0.5 s, auto-frame
+  20 s, cap 90 frames) — no G.O.D.O.T numbers inside.
+  Session file `session-<yyyymmdd-hhmmss>.log`: a
+  `# GODOT-TELEMETRY v1 build=… godot=… started=…` header,
+  then `t=<s> SNAPSHOT pos=… vy=… fps=… wanted=… in_car=…
+  hp=… cash=…` lines and `t=<s> EVENT <name> k=v …` lines.
+  Writes are appends on an open handle, flushed per line.
+  **No network code anywhere in it.**
+- **Frames** — PNG beside the log (`frame-<t>.png`), every
+  20 s, on BUSTED, and on **F9** (the only control added:
+  a `MARKER` event + a forced frame — "it broke right
+  here"). Capture goes through a `frame_provider` Callable
+  because viewport grabs are renderer-dependent: tests
+  inject generated images, the game injects its viewport,
+  and a null/empty image is refused — which is what makes
+  headless runs safe. Past 90 frames the oldest are deleted.
+- **Game wiring** (`gate3d_main.gd`) — session starts in
+  `_ready` (build label `Detail1+Telemetry`; dir
+  `user://playtest`, `user://playtest_autotest` under
+  `--autotest`, `GODOT_TELEMETRY_DIR` env override between
+  the two). `_process` builds the state dict and calls
+  `tick`. Events at the existing code points, rules
+  untouched: `SESSION_START`, `WANTED` (from/to/level, on
+  floori change — rises AND decay), `UPGRADE` (id/level/
+  cost), `CAR_ENTER`/`CAR_EXIT`, `PICKUP` (kind, +weapon
+  name), `BUSTED` (+ forced frame). The HUD help line now
+  ends "· F9 mark a moment".
+- **Parser** — `tools/playtest_digest.py` (repo root, NOT
+  in the export; stdlib-only Python): reads a session dir
+  and prints a Markdown digest per session — duration,
+  snapshot/event counts, tallies (pickups by kind), the
+  frame index, nearest frame per marker/anomaly, and
+  ANOMALIES under exactly the spec's rules: on-foot jump
+  > 25 u between snapshots, y outside [−5, 30], fps < 20
+  sustained ≥ 3 s, NaN anywhere.
+
+**TDD record:**
+
+- Parser RED (self-test written first, parser absent):
+  `PARSER SELFTEST FAIL: tools/playtest_digest.py does not
+  exist yet (parser not written)`, exit 1. GREEN:
+  `PARSER SELFTEST PASS: planted_exact clean_zero
+  marker_nearest_frame` — the planted session (jump, y,
+  fps-run, NaN) flags exactly those four; the clean session
+  (including a 1 s fps dip and a 30 u jump *in a car*)
+  flags none. One fixture fix on the way: the self-test's
+  expected snapshot count was corrected 15 → 13 (fixture
+  arithmetic; the parser was right).
+- Logger RED (checks written first via `load()` / `get()`
+  seams, so a missing module fails as assertions, not a
+  parse error; all five prior AUTOTEST lines and four
+  SMOKETEST lines printed verbatim above these):
+  ```
+  AUTOTEST FAIL: telemetry_log: res://core/debug_log.gd is missing
+  AUTOTEST FAIL: telemetry_log: game has no debug_log (telemetry not wired)
+  SMOKETEST FAIL: telemetry: res://core/debug_log.gd missing
+  ```
+- GREEN, staged per the plan: DebugLog alone turned the
+  smoketest line and the autotest unit half green (wiring
+  check still red, as staged); the wiring then closed it.
+  New lines, project AND exported binary:
+  `AUTOTEST PASS: telemetry_log session snapshots events
+  frames marker wiring` and `SMOKETEST PASS: telemetry
+  debug_log`. Refactor (event call sites collapsed into a
+  `_telemetry_event` helper; parser line-parsing shared)
+  left the suite identically green.
+
+**Validate & review (2026-11-01, this VM, Godot 4.3):**
+
+- **Real session, real renderer:** 95 s Xvfb run of the
+  game scene → `session-20261101-163042.log` (92.4 s of
+  snapshots, 158 of them) + frames at t = 27.76 / 49.45 /
+  71.14 (~20 s apart). Frame pixel check (PIL): 1280×720,
+  **6,415 unique colours** in a 320×180 downscale, red
+  channel σ 47.0 — a real rendered frame, not a black
+  grab. The BUSTED frame from the Xvfb autotest session:
+  6,491 unique colours.
+- **Event proof on real code paths:** the Xvfb `--autotest`
+  session file contains, in order: `SESSION_START`,
+  `WANTED from=0 to=1`, `CAR_ENTER`, `CAR_EXIT`,
+  `UPGRADE` ×3 (hp/damage/firerate at their real costs),
+  `MARKER` (the F9 wiring check), `BUSTED cash=777
+  score=4321` — telemetry watching the test play the game.
+- **The digest on the real session** flags exactly one
+  anomaly, and it is a true reading: `fps_sustained — fps
+  < 20 for 86.1 s`. The Xvfb renderer is Mesa **llvmpipe**
+  (software GL) on this VM and genuinely ran the scene at
+  1–9 fps (mode 7–8). That's an artifact of the capture
+  environment, not of Vee's hardware (the same build plays
+  fine on her UHD 600) — and surfacing exactly this class
+  of signal is the digest's job.
+- 1200-frame headless run: exit 0, **zero script errors**
+  (419 "Parameter m is null" artifacts, counted, known).
+- **Edge cases reviewed:** *Unwritable dir* —
+  `GODOT_TELEMETRY_DIR=/proc/nope/telemetry`: game runs
+  120 frames clean, exactly ONE stderr line (`DebugLog:
+  cannot create telemetry dir … (telemetry disabled)`),
+  zero script errors; the logger is inert from then on.
+  *BUSTED mid-capture* — the BUSTED frame is grabbed
+  synchronously from the current viewport texture inside
+  `on_player_death`, before the explosion/reload sequence;
+  there is no async gap to race. *Rotation during play* —
+  deletion happens inside `capture_frame` immediately
+  after a successful save, oldest first; the unit contract
+  exercises cap 3 (and cap 2 in the smoketest) with real
+  files. *Session-name collisions* — one session per game
+  run by construction (a second-resolution timestamp; two
+  runs in the same second to the same dir would share a
+  file — accepted, noted, not worth machinery).
+  *Privacy* — files land only in the app's user dir on the
+  player's machine; nothing is sent anywhere by the game.
+
+**Export:** `builds/GODOT-Linux/GODOT.x86_64`, 66,246,816
+bytes, sha256
+`a46fbc23c882b7f0c0b2117465cd5468275a1aeee79093b731bd9f6123121e15`;
+in the exported binary: 300 frames clean, all six AUTOTEST
+PASS lines, all five SMOKETEST PASS lines. Zip:
+`builds/GODOT-Linux-Telemetry.zip` (24,332,105 bytes,
+sha256 `1f010a5437e05a1e99fb16eacf490f605645b88e7c2ef40a66e95740a4ff6c62`).
+How it feels in a real play session on iwantitnow:
+**[unverified]** until Vee plays this build and a session
+gets fetched — same rule as always.
+
+## Wanted pacing fix (2026-11-01, from Vee's playtest)
+
+Vee, playing the telemetry build on iwantitnow: **"ive killed
+a lot of ped in the game and have not gotten a single star nor
+have i seen any policia."** She was right, and the numbers say
+why. The system worked exactly as ported — the ported numbers
+don't survive 3D pacing:
+
+- **Gains too small for 3D spacing.** `kill_ped` paid the HTML's
+  +0.15, so a star needs 7 ped kills (1.0 / 0.15). In the HTML's
+  dense top-down world that's seconds of mayhem; in the 3D city
+  kills are minutes apart.
+- **Decay too coarse.** `Wanted.tick()` removed a FULL 1.0 star
+  after 600 crime-free frames, so whatever fraction accumulated
+  between spaced-out kills evaporated in one step.
+- **The coverage gap:** every older autotest injected
+  `add_wanted(1.4)` directly and never exercised a realistic
+  kill chain — the bug lived exactly where no test looked.
+
+**RED (autotest section 11 written first, run against the
+unfixed code; all six prior PASS lines printed verbatim above
+these, exit 1):**
+```
+AUTOTEST FAIL: wanted_pacing: 3 ped kills 300 frames apart gave level 0.45 (0 stars), expected >= 1 star
+AUTOTEST FAIL: wanted_pacing: try_spawn_enemy(true) at 0 stars (level 0.45) spawned nothing
+AUTOTEST FAIL: wanted_pacing: decay from 1.20 after 601 crime-free frames gave 0.20, expected ~0.95 (one partial decay_step)
+```
+The chain drives the REAL `kill_ped` path (fresh peds, three
+kills, 300 wanted ticks after each — 5 s at 60 fps), then
+checks a forced spawn from the resulting state, then decay.
+
+**GREEN (minimal, tuning only):** gains moved to a live tuning
+block in the data — `wanted.gains` in
+`data/enemies_world_wanted.json` — and `gate3d_main` reads all
+three kill paths from it (run-over kills use `kill_ped_runover`;
+fallbacks are the HTML numbers if the block is absent).
+`core/wanted.gd`'s decay now subtracts a `decay_step` that
+arrives via `setup(cfg)` with **default 1.0**, so core stays
+game-agnostic: the smoketest's config sets no `decay_step` and
+keeps the old whole-star behaviour, all five SMOKETEST PASS
+lines verbatim. Nothing else moved: caps, spawn types,
+`decay_frames` 600 all unchanged.
+
+| Tuning | Old (HTML) | New (live) |
+|---|---|---|
+| kill_ped | 0.15 | **0.35** |
+| kill_ped_runover | 0.15 | **0.35** |
+| destroy_car | 0.3 | 0.3 (unchanged value, now from data) |
+| kill_enemy | 0.1 | 0.1 (unchanged value, now from data) |
+| decay step | 1.0 (whole star) | **0.25** |
+
+Three ped kills now bank 1.05 → star 1 → cops spawn; a quiet
+600 frames costs a quarter-star, not the whole record.
+`gains_in_html` in the data is **untouched** — it is the
+historical record, not the live tuning.
+
+**Validation:** new seventh line, project AND exported
+binary: `AUTOTEST PASS: wanted_pacing ped_chain_star
+cop_spawn decay_partial`, alongside all six prior AUTOTEST
+lines and all five SMOKETEST lines, verbatim. 1200-frame
+headless run: exit 0, zero script errors. Export:
+`builds/GODOT-Linux/GODOT.x86_64`, 66,248,064 bytes, sha256
+`a5fd3b2199550f18e09baf837fdf6b39697d17c1f1804af4479399f823238f55`;
+exported binary ran 300 frames clean and passes the full
+autotest. Zip: `builds/GODOT-Linux-WantedFix.zip` (24,333,414
+bytes, sha256
+`e2ac6fe667dee02a9c743d5f831b0ce10179663648dde3658ab7212a535650ed`).
+Whether the policia actually show up at a satisfying pace on
+real hardware is **[unverified]** until Vee plays this build —
+the test proves the chain reaches a star and spawns a cop;
+the feel of the pacing is hers to judge.

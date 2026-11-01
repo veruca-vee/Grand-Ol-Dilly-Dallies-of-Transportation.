@@ -19,12 +19,17 @@ var max_stars: int = 6
 var caps: Array = [0, 3, 6, 10, 15, 22, 30]
 var spawn_types: Array = ["cop"]
 var decay_frames: int = 600
+# How much ONE decay step removes. Default 1.0 (a whole star, the
+# original behaviour); a game whose pacing wants gentler decay
+# passes its own value in the config (G.O.D.O.T's data: 0.25).
+var decay_step: float = 1.0
 
 func setup(cfg: Dictionary) -> void:
 	max_stars = int(cfg.get("max_stars", 6))
 	caps = cfg.get("max_active_enemies_by_star", caps)
 	spawn_types = cfg.get("spawn_type_by_star_index_0_based", spawn_types)
 	decay_frames = int(cfg.get("decay_frames_without_crime", 600))
+	decay_step = float(cfg.get("decay_step", 1.0))
 
 func add(amt: float) -> void:
 	level = minf(float(max_stars), level + amt)
@@ -39,14 +44,16 @@ func cap(stars_: int) -> int:
 func spawn_type(stars_: int) -> String:
 	return str(spawn_types[mini(maxi(stars_ - 1, 0), spawn_types.size() - 1)])
 
-# Per-physics-frame decay tick; true on the frame a star drops.
+# Per-physics-frame decay tick; true on the frame a decay step
+# lands (a whole star at the default decay_step, less if the
+# game's config says so — the level is a float either way).
 func tick() -> bool:
 	if level <= 0.0:
 		return false
 	frames_since_crime += 1
 	if frames_since_crime > decay_frames:
 		frames_since_crime = 0
-		level = maxf(0.0, level - 1.0)
+		level = maxf(0.0, level - decay_step)
 		return true
 	return false
 

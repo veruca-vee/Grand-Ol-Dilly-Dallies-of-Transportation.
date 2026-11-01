@@ -69,6 +69,7 @@ conventions (G.O.D.O.T's files in `res://data/` are the reference):
 | `flap_rig.gd` | `FlapRig` | The hinge-head character rig: box body builder, beady eyes on the upper head, `tick_flap()`, `face_direction()`; subclass it for player/peds/enemies | `shirt_color`/`pants_color`/`skin_color`, optional cap |
 | `city_dressing.gd` | `CityDressing` | Procedural textures/materials/meshes (facades with lit windows, asphalt, props) + MultiMesh builder | seeds/palette in code |
 | `city_builder.gd` | `CityBuilder` | Seeded city generation: sky/fog/sun, ground, roads + markings, building clusters, props; returns building footprints for spawn placement | layout constants in code (52 pitch / 240 extent / seed 2004 — G.O.D.O.T's city) |
+| `debug_log.gd` | `DebugLog` | Playtest telemetry: session log (header + timed snapshots + events), capped frame captures with rotation, core-owned timing via `tick()`; local files only, disables itself silently on an unwritable dir | `snapshot_interval` / `frame_interval` / `frame_cap` (engine defaults 0.5 s / 20 s / 90); dir + build label and a `frame_provider` Callable at `start_session` |
 
 ## Rules the core lives by
 
@@ -96,4 +97,5 @@ SMOKETEST PASS: move camera_relative
 SMOKETEST PASS: shoot damage_dealt
 SMOKETEST PASS: buy upgrade_purchase
 SMOKETEST PASS: wanted_floor save_roundtrip flap_rig sfx_synth
+SMOKETEST PASS: telemetry debug_log
 ```

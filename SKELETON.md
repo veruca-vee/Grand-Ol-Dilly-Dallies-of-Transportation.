@@ -270,6 +270,71 @@ and an actual simulator"
   real hardware: [unverified] until Vee runs the markfix build.
   Full record: README "Detail 1 fix: markings".
 
+## Playtest Telemetry status (2026-11-01, built + verified; Vee's request)
+
+- Vee's words: "add a live debug log and screenshot/parser
+  for when I play so you can see all the things that break
+  or work." Done under METHOD.md (spec
+  `design/TELEMETRY_SPEC.md`, plan `design/TELEMETRY_PLAN.md`,
+  red runs recorded in the README gate section).
+- `core/debug_log.gd` (DebugLog, engine core): every run
+  writes `session-<timestamp>.log` (header, 0.5 s state
+  snapshots, events: BUSTED / WANTED / UPGRADE / CAR_ENTER /
+  CAR_EXIT / PICKUP) + `frame-<t>.png` screenshots every
+  20 s, on BUSTED, and on **F9** (MARKER + forced frame),
+  capped at 90 frames. Local files only, no network.
+- Parser `tools/playtest_digest.py` (repo root, not in the
+  export): Markdown digest with anomalies (on-foot jump
+  > 25 u, y outside [−5, 30], fps < 20 for ≥ 3 s, NaN) and
+  nearest-frame lookup per marker/anomaly. Self-test:
+  planted session flags exactly its 4 planted anomalies,
+  clean session flags none.
+- Contract: new lines `AUTOTEST PASS: telemetry_log …` and
+  `SMOKETEST PASS: telemetry debug_log` join the existing
+  five + four, all green in project AND export. Validated
+  on a real 95 s Xvfb session (158 snapshots, real frames
+  pixel-checked, digest's one fps anomaly = this VM's
+  llvmpipe software rendering, labelled as such in the
+  README). Build: 66,246,816 bytes, sha256 a46fbc2…121e15,
+  zip `builds/GODOT-Linux-Telemetry.zip`. Feel in a real
+  play session on iwantitnow: [unverified] until Vee plays
+  it and a session is fetched.
+- **Fetch/digest workflow (3 lines):** sessions land in
+  `~/.local/share/godot/app_userdata/G.O.D.O.T - Grand Ol
+  Dilly-Dallies Of Transportation/playtest/` on the
+  player's machine → Hexe pulls the session dir over SSH
+  when Vee says a session happened → digest + frames are
+  reviewed in this HQ chat (`python3 tools/playtest_digest.py
+  <session-dir>`).
+
+## Wanted pacing fix status (2026-11-01, built + verified headless)
+
+- **Playtest bug (Vee, iwantitnow): "ive killed a lot of ped in
+  the game and have not gotten a single star nor have i seen
+  any policia."** Root cause, in the ported numbers: kill_ped
+  paid the HTML's +0.15 (7 kills per star) while decay removed
+  a FULL 1.0 star after 600 crime-free frames — in 3D, kills
+  are minutes apart, so wanted never accumulated. Older
+  autotests injected `add_wanted(1.4)` and never tested a
+  realistic kill chain; that gap is now closed.
+- **Fix (TDD, red first):** new autotest section 11 went RED
+  with the real numbers (3 kills 300 frames apart → level
+  0.45, 0 stars, no spawn; decay 1.20 → 0.20). Gains moved to
+  a live `wanted.gains` block in the data (kill_ped 0.35,
+  kill_ped_runover 0.35, destroy_car 0.3, kill_enemy 0.1) and
+  decay is now a partial `decay_step` 0.25 (core `Wanted`
+  default stays 1.0 — smoketest lines verbatim). Caps, spawn
+  types, decay_frames 600 unchanged; `gains_in_html` untouched
+  as the historical record. New line `AUTOTEST PASS:
+  wanted_pacing ped_chain_star cop_spawn decay_partial` —
+  seventh AUTOTEST line, green in project AND export; 1200
+  frames zero script errors. Full record: README "Wanted
+  pacing fix".
+- Build: 66,248,064 bytes, sha256 a5fd3b21…f55, zip
+  `builds/GODOT-Linux-WantedFix.zip`. A real-hardware policia
+  sighting at a satisfying pace is **[unverified]** until Vee
+  plays this build.
+
 ## Gate 0 status (2026-10-29, verified)
 
 - Built in `engine/` (Godot 4.3): main/city/player/car/ped/enemy/bullet/
