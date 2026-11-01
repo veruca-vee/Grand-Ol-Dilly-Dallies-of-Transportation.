@@ -157,6 +157,28 @@ func _build_city(parent: Node3D) -> void:
 	gshape.position = Vector3(0, -0.5, 0)
 	ground.add_child(gshape)
 	parent.add_child(ground)
+	# Fall fix (2026-11-01): invisible world-edge walls just
+	# outside the slab — one body, four shapes, no meshes, so
+	# nothing can leave the ground (Vee's first live sessions:
+	# drove past x=120 and fell to y=-771). Slow contact stops
+	# here; the GAME layer turns fast contact into the bonk
+	# launch. Tall enough that roof-height crossings stay in.
+	var edge_body := StaticBody3D.new()
+	var wall_h := 30.0
+	var wall_specs := [
+		[Vector3(WORLD_HALF + 1.0, wall_h / 2.0, 0), Vector3(2, wall_h, WORLD_HALF * 2 + 4)],
+		[Vector3(-WORLD_HALF - 1.0, wall_h / 2.0, 0), Vector3(2, wall_h, WORLD_HALF * 2 + 4)],
+		[Vector3(0, wall_h / 2.0, WORLD_HALF + 1.0), Vector3(WORLD_HALF * 2 + 4, wall_h, 2)],
+		[Vector3(0, wall_h / 2.0, -WORLD_HALF - 1.0), Vector3(WORLD_HALF * 2 + 4, wall_h, 2)],
+	]
+	for spec in wall_specs:
+		var wshape := CollisionShape3D.new()
+		var wbox := BoxShape3D.new()
+		wbox.size = spec[1]
+		wshape.shape = wbox
+		wshape.position = spec[0]
+		edge_body.add_child(wshape)
+	parent.add_child(edge_body)
 	# roads: asphalt-textured strips on the grid. Detail 1 markings
 	# fix: strip centre y 0.09 puts the asphalt top (0.115) ABOVE
 	# the pad tops (0.10), so the road surface — and its markings —

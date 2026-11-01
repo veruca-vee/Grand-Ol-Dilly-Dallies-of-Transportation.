@@ -802,3 +802,179 @@ Whether the policia actually show up at a satisfying pace on
 real hardware is **[unverified]** until Vee plays this build —
 the test proves the chain reaches a star and spawns a cop;
 the feel of the pacing is hers to judge.
+
+## Fall fix (2026-11-01, TDD red → green → refactor; Vee's first live telemetry)
+
+**The bug, from her own telemetry.** In Vee's first live
+sessions on the telemetry build (archived at
+`~/workspace/playtest-archive/2026-11-01-first-live/`),
+`session-20261101-094432.log` shows her driving east in a car
+at z≈-38, y=0.25, x 35 → 127 — and then falling: at x≈127.5
+vy starts accelerating, the car falls to **y=-771**, she
+exits mid-fall at t=48.11 and keeps falling on foot. The
+city's ground slab ends at `CityBuilder.WORLD_HALF` (120);
+past it there was no ground, no boundary, and no kill-plane.
+(FPS on her hardware was 31–60, healthy; the same archive
+verifies the wanted fix live — WANTED 0→1 in three sessions.)
+
+**Direction change mid-gate (Vee, 2026-11-01):** the planned
+fix was invisible walls that dead-stop you at the edge. Her
+amendment, verbatim: **"bonk should send you flying like
+old mx vs atv logic."** The walls still exist (nothing
+leaves the world), but fast contact now LAUNCHES: velocity
+reflects off the edge with a boost plus an upward pop,
+arcing you back onto the map. Slow contact just blocks.
+
+**What shipped:**
+
+- **Boundary walls** (`core/city_builder.gd`): one
+  StaticBody3D, four box shapes just outside ±WORLD_HALF,
+  30 tall, no meshes. +5 nodes (796 → **801**, budget < 900),
+  MultiMesh instances unchanged (1,325).
+- **Kill-plane respawn** (game layer): the actor (player on
+  foot, or the driven car with the player in it) below
+  `kill_plane_y` respawns at the nearest road-centre point
+  that clears every building footprint (player spawn as
+  final fallback), velocity zeroed, car uprighted, still in
+  the car. **No cash/score penalty** — none was specified,
+  so none was invented. Logs a `RESPAWN` telemetry event.
+- **Bonk** (game layer + body launch state): contact with
+  an edge wall at impact speed ≥ `bonk_min_speed` reflects
+  the intended horizontal velocity × `bonk_restitution` and
+  adds `bonk_up_pop` upward. The launch is carried by state
+  the bodies own (`Player3D.apply_launch` / `Car3D.
+  apply_bonk` + a 0.5 s ballistic-Y window) because walk
+  input and the floor clamp would otherwise rewrite the
+  velocity the very next physics tick — a velocity-only
+  rewrite in the game layer provably cannot survive a frame.
+  Logs a `BONK` event (impact speed + position). Tuning
+  lives in the data's new `edge` block:
+
+  | Tuning | Value |
+  |---|---|
+  | kill_plane_y | -20 |
+  | bonk_restitution | 1.2 |
+  | bonk_up_pop | 7.0 |
+  | bonk_min_speed | 6.0 |
+
+- **Telemetry hardening** (same live sessions): (a) frame
+  files now carry the session stamp —
+  `frame-<yyyymmdd-hhmmss>-<t>.png` — because all sessions
+  shared one dir and overwrote each other's `frame-<t>.png`
+  files. `core/debug_log.gd` change only; the digest parser
+  reads BOTH namings, so old archives still digest.
+  (b) The parser (`tools/playtest_digest.py`) groups
+  consecutive same-rule anomalies (next start within 1 s of
+  the group's end) into one entry with a t-range and count.
+
+**RED (recorded before the fixes):**
+
+Parser selftest, after planting a 3-snapshot y run and a
+session-stamped frame name:
+```
+PARSER SELFTEST FAIL: planted anomalies [('fps_sustained', 2.5), ('nan', 6.0), ('position_jump', 1.0), ('y_out_of_range', 2.0), ('y_out_of_range', 2.5), ('y_out_of_range', 3.0)] != expected [('fps_sustained', 2.5), ('nan', 6.0), ('position_jump', 1.0), ('y_out_of_range', 2.0)]
+PARSER SELFTEST FAIL: marker at t=6.50 nearest frame is frame-0.00.png, expected frame-20261101-000000-5.75.png
+PARSER SELFTEST FAIL: planted y run produced 3 entries, expected 1 grouped entry
+PARSER SELFTEST FAIL: planted frames [{'t': 0.0, 'name': 'frame-0.00.png'}, {'t': 20.0, 'name': 'frame-20.00.png'}] != 3
+```
+
+Frame naming (autotest section 10 assertions updated to the
+stamped contract first):
+```
+AUTOTEST FAIL: telemetry_log: marker() kept frames ["user://telemetry_autotest_unit/frame-20.00.png"], expected one frame-<session-stamp>-20.00.png
+AUTOTEST FAIL: telemetry_log: newest frame file frame-<session-stamp>-33.00.png missing
+```
+
+Game (new autotest section 12, all seven prior PASS lines
+verbatim above these, exit 1):
+```
+AUTOTEST FAIL: fall_respawn: on-foot fall to y=-30 left the player at y=-30.14 (no respawn)
+AUTOTEST FAIL: fall_respawn: respawned player still falling (vy=-2.33)
+AUTOTEST FAIL: fall_respawn: respawn point (30, -30.14167, -38) is not on a road
+AUTOTEST FAIL: fall_respawn: no RESPAWN telemetry event for the on-foot fall
+AUTOTEST FAIL: fall_respawn: car fell to y=-30 and kept falling (car y=-30.14, no respawn)
+AUTOTEST FAIL: fall_respawn: car respawn point (60, -30.14167, 40) is not on a road
+AUTOTEST FAIL: fall_respawn: respawned car still falling (vy=-2.33)
+AUTOTEST FAIL: fall_respawn: no RESPAWN telemetry event for the in-car fall
+AUTOTEST FAIL: bonk: car hit the +X edge at speed 20 and no BONK fired (pos (135.1389, -5.149058, 0.000001), speed 19.8)
+AUTOTEST FAIL: bonk: slow car left the world (x=120.19)
+AUTOTEST FAIL: bonk: walking player left the world (x=121.10)
+AUTOTEST FAIL: bonk: on-foot impact at 14 u/s did not launch (pos (127.0057, -2.8177, -0))
+```
+
+**Three test-design corrections during the gate** (recorded
+per METHOD — the tests were wrong, in specific ways, and
+the fixes are part of the record):
+
+1. **BUSTED moved.** Section 12 first ran after section
+   10's `on_player_death()`, whose 2.5 s scene-reload timer
+   fired mid-section and looped the autotest through scene
+   reloads forever, printing nothing (probe: zero AUTOTEST
+   lines in 60 s, a fresh telemetry session every ~7 s).
+   The BUSTED wiring check now runs at the very end of the
+   autotest; its assertions are unchanged and section 10's
+   other checks are untouched.
+2. **The slow car blocked its own lane.** The first RED
+   run's on-foot checks stopped at x=117.84 — exactly a car
+   length + capsule radius short of the slow-test car left
+   parked at the edge. The test now moves that car back to
+   its spawn spot before the on-foot checks.
+3. **Settle time.** The first GREEN run failed only
+   `vy=-2.33` on both respawn checks: the respawn fires on
+   tick one, but the body's last ~0.1 u drop to the road
+   takes ~6 frames to settle at gravity 22. The checks now
+   wait 16 frames; the assertion (velocity ≈ 0, on a road)
+   is unchanged.
+
+**GREEN:** new eighth line, project AND exported binary:
+`AUTOTEST PASS: fall_respawn kill_plane_foot kill_plane_car
+bonk_launch bonk_slow_block`, all seven prior AUTOTEST
+lines and all five SMOKETEST lines verbatim; parser
+selftest PASS line gains the `grouped_anomalies` token.
+Suite run 3× consecutively green in the project.
+REFACTOR step: reviewed — the launch state is symmetric
+across the two bodies and the game-layer check reads in
+one pass; no change was warranted, and the suite is
+identically green.
+
+**Validation & review:**
+
+- **Archived fall, re-digested with the new parser:** the
+  fall session's anomaly list goes from 22 lines to one:
+  `- t=45.01..55.52 [y_out_of_range] ×22 y=-5.63 outside
+  [-5, 30] (nearest frame: frame-46.67.png)` — and every
+  other archived session digests exactly as before (0
+  anomalies), proving old sessions stay readable.
+- 1200-frame headless run: exit 0, **0 script errors**
+  (419 known "m is null" dummy-renderer artifacts, counted
+  only). Xvfb screenshot: 1280×720, 7,411 unique colours,
+  ≈5.9 k sign-accent (C77DFF) pixels — visually unchanged,
+  walls invisible as designed.
+- Edge cases reviewed: bonk detection reads the car's
+  carried `speed` (survives the collision slide) and the
+  on-foot *intended* velocity (the slide eats the real
+  one); reversing into a wall bonks correctly, since the
+  check uses the travel vector, not facing. A building
+  face inside the edge margin could in principle false-
+  trigger a launch — outcome is a harmless inward bounce,
+  accepted. The kill-plane checks only the actor (ambient
+  cars/peds cannot leave the walled world anyway). The
+  0.75 s bonk cooldown prevents double-triggers while a
+  body is still kissing the wall. Un-driven cars and peds
+  also collide with the walls — they never path out there,
+  and spawn placement is unchanged (interior ring).
+- Export: `builds/GODOT-Linux/GODOT.x86_64`, 66,257,984
+  bytes, sha256
+  `f6c7c58ce3c4a7ccfd6fa947d021824957ae90a6b0f9e86b8a3ffa84f9244916`;
+  exported binary: full autotest PASS (all 8 lines, exit
+  0) and 300 frames clean. (Binary runs on this display-
+  less VM need `--headless`; a bare run fails on X11 init
+  before any game code — environment, not the build.)
+  Zip: `builds/GODOT-Linux-FallFix.zip` (24,343,021 bytes,
+  sha256
+  `27a1ac69834274572d04a4af4c292b6604f046011b7a197ad6674eca7c56dbec`).
+
+Real-hardware edge behaviour is **[unverified]** until Vee
+drives off a cliff again: the tests prove the respawn and
+the launch contracts; whether the bonk *feels* like MX vs
+ATV is hers to judge.

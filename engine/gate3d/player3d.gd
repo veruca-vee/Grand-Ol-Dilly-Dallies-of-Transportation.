@@ -19,6 +19,17 @@ var dead: bool = false
 var fire_flap_time: float = 0.0
 var main: Node = null
 var gun: MeshInstance3D = null
+# Fall fix: edge-bonk launch state, set by gate3d_main via
+# apply_launch (Vee's MX vs ATV amendment: the world edge
+# launches you back in). While launch_time runs, the launch
+# velocity owns the horizontal axes and Y is ballistic.
+var launch_vel := Vector3.ZERO
+var launch_time := 0.0
+
+func apply_launch(horizontal: Vector3, pop: float) -> void:
+	launch_vel = horizontal
+	launch_time = 0.5
+	velocity.y = pop
 # Autotest seam: when x is not NaN, this replaces the WASD key reads
 # (x = strafe D-A, y = forward W-S) so headless tests can "walk".
 # Normal play never sets it.
@@ -59,28 +70,39 @@ func _physics_process(delta: float) -> void:
 		return
 	if driving != null:
 		return  # main syncs our position to the car
-	# Walk input as a 2D vector: x = strafe (D-A), y = forward (W-S).
-	# Input reading + the camera-relative math are ENGINE CORE
-	# (core/controller.gd, core/follow_camera.gd owns the yaw):
-	# W walks where the follow camera looks, not world-north (the
-	# Gate 3D-2 walk fix). The seam below lets the autotest walk.
-	var input_vec := Controller.read_walk_input()
-	if not is_nan(move_override.x):
-		input_vec = move_override
-	var yaw := 0.0
-	if main != null:
-		var yv: Variant = main.get("cam_yaw")
-		if yv != null:
-			yaw = float(yv)
-	var dir := Controller.move_dir(input_vec, yaw)
-	if not is_on_floor():
+	if launch_time > 0.0:
+		# Bonk arc: no input, no floor clamp on Y (that clamp
+		# would eat the up-pop in one frame). Horizontal axes
+		# belong to the launch until the timer runs out.
+		launch_time -= delta
 		velocity.y -= gravity * delta
+		velocity.x = launch_vel.x
+		velocity.z = launch_vel.z
+		if launch_vel.length() > 0.05:
+			face_direction(launch_vel.normalized())
 	else:
-		velocity.y = -0.5
-	velocity.x = dir.x * walk_speed
-	velocity.z = dir.z * walk_speed
-	if dir.length() > 0.05:
-		face_direction(dir)
+		# Walk input as a 2D vector: x = strafe (D-A), y = forward (W-S).
+		# Input reading + the camera-relative math are ENGINE CORE
+		# (core/controller.gd, core/follow_camera.gd owns the yaw):
+		# W walks where the follow camera looks, not world-north (the
+		# Gate 3D-2 walk fix). The seam below lets the autotest walk.
+		var input_vec := Controller.read_walk_input()
+		if not is_nan(move_override.x):
+			input_vec = move_override
+		var yaw := 0.0
+		if main != null:
+			var yv: Variant = main.get("cam_yaw")
+			if yv != null:
+				yaw = float(yv)
+		var dir := Controller.move_dir(input_vec, yaw)
+		if not is_on_floor():
+			velocity.y -= gravity * delta
+		else:
+			velocity.y = -0.5
+		velocity.x = dir.x * walk_speed
+		velocity.z = dir.z * walk_speed
+		if dir.length() > 0.05:
+			face_direction(dir)
 	if fire_flap_time > 0.0:
 		fire_flap_time -= delta
 	is_talking = Input.is_key_pressed(KEY_T) or fire_flap_time > 0.0

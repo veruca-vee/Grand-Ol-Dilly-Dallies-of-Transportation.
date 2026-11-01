@@ -7,7 +7,13 @@ Builds two fake playtest sessions:
 * PLANTED — a session with exactly four anomalies, one per
   digest rule (on-foot position jump > 25 u, y out of
   [-5, 30], fps < 20 sustained >= 3 s, NaN), plus a MARKER
-  event and three fake frames.
+  event and three fake frames. The y anomaly is a RUN of
+  three consecutive out-of-range snapshots: the digest must
+  group consecutive same-rule anomalies into ONE entry with
+  a t-range and a count (the 2026-11-01 live fall produced
+  22 y lines for a single fall). One frame uses the new
+  session-stamped name (frame-<yyyymmdd-hhmmss>-<t>.png);
+  the others use the old name — both must parse.
 * CLEAN — a session that must produce ZERO anomalies,
   including the traps: a brief 1 s fps dip (not sustained),
   and a 30 u position jump while in_car=true (the jump rule
@@ -45,9 +51,9 @@ def planted_lines():
         snap(0.50, x=1.0),
         snap(1.00, x=40.0),          # PLANTED jump: 39 u on foot
         snap(1.50, x=41.0),
-        snap(2.00, x=41.0, y=-9.0),  # PLANTED y out of range
-        snap(2.50, x=41.0, fps=10),  # fps run starts (7 x 0.5 s)
-        snap(3.00, x=41.0, fps=10),
+        snap(2.00, x=41.0, y=-9.0),  # PLANTED y run (1 of 3)
+        snap(2.50, x=41.0, y=-30.0, fps=10),  # y run (2 of 3); fps run starts (7 x 0.5 s)
+        snap(3.00, x=41.0, y=-80.0, fps=10),  # y run (3 of 3)
         snap(3.50, x=41.0, fps=10),
         snap(4.00, x=41.0, fps=10),
         snap(4.50, x=41.0, fps=10),
@@ -109,7 +115,8 @@ def main():
     try:
         planted = write_session(
             root, "planted", planted_lines(),
-            ["frame-0.00.png", "frame-5.75.png", "frame-20.00.png"])
+            ["frame-0.00.png", "frame-20261101-000000-5.75.png",
+             "frame-20.00.png"])
         clean = write_session(
             root, "clean", clean_lines(),
             ["frame-0.00.png", "frame-9.50.png"])
@@ -137,11 +144,30 @@ def main():
         if len(p["markers"]) != 1:
             failures.append("planted markers %s != 1 entry"
                             % p["markers"])
-        elif p["markers"][0].get("nearest_frame") != "frame-5.75.png":
+        elif p["markers"][0].get("nearest_frame") \
+                != "frame-20261101-000000-5.75.png":
             failures.append(
                 "marker at t=6.50 nearest frame is %s, "
-                "expected frame-5.75.png"
+                "expected frame-20261101-000000-5.75.png"
                 % p["markers"][0].get("nearest_frame"))
+        # grouping: the 3-snapshot y run is ONE entry, count 3,
+        # spanning t=2.00..3.00 (not three separate anomalies)
+        y_entries = [a for a in p["anomalies"]
+                     if a["rule"] == "y_out_of_range"]
+        if len(y_entries) != 1:
+            failures.append(
+                "planted y run produced %d entries, expected "
+                "1 grouped entry" % len(y_entries))
+        else:
+            ye = y_entries[0]
+            if ye.get("count") != 3:
+                failures.append(
+                    "grouped y entry count %s != 3"
+                    % ye.get("count"))
+            if abs(ye.get("t_end", -1) - 3.00) > 0.001:
+                failures.append(
+                    "grouped y entry t_end %s != 3.00"
+                    % ye.get("t_end"))
         if len(p["frames"]) != 3:
             failures.append("planted frames %s != 3" % p["frames"])
         for a in p["anomalies"]:
@@ -164,7 +190,7 @@ def main():
             print("PARSER SELFTEST FAIL: " + f)
         return 1
     print("PARSER SELFTEST PASS: planted_exact clean_zero "
-          "marker_nearest_frame")
+          "marker_nearest_frame grouped_anomalies")
     return 0
 
 

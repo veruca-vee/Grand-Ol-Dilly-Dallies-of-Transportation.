@@ -3,10 +3,20 @@
 game export.
 
 Reads a playtest session dir (as written by core DebugLog:
-session-<yyyymmdd-hhmmss>.log + frame-<t>.png files beside it)
-and prints a Markdown digest per session log: duration,
+session-<yyyymmdd-hhmmss>.log + frame files beside it) and
+prints a Markdown digest per session log: duration,
 snapshot/event counts, event tallies, an ANOMALIES list, the
 frame index, and the nearest frame to every marker/anomaly.
+Frame names come in two generations and both parse: the old
+frame-<t>.png and, since the Fall fix gate, the
+session-stamped frame-<yyyymmdd-hhmmss>-<t>.png (the stamp
+stops sessions sharing one dir from overwriting each other's
+frames).
+
+Consecutive anomalies of the same rule (each starting within
+1 s of the previous one's end) are grouped into ONE entry
+with a t-range and a count: the 2026-11-01 live fall was a
+single event that produced 22 y_out_of_range lines.
 
 Anomaly rules (TELEMETRY_SPEC statement 6, exactly):
   * position jump > 25 u between consecutive snapshots while
@@ -28,12 +38,14 @@ SNAP_RE = re.compile(
     r"^t=(\S+) SNAPSHOT pos=(\S+?),(\S+?),(\S+?) vy=(\S+) "
     r"fps=(\S+) wanted=(\S+) in_car=(\S+) hp=(\S+) cash=(\S+)")
 EVENT_RE = re.compile(r"^t=(\S+) EVENT (\S+)(?:\s+(.*))?$")
-FRAME_RE = re.compile(r"^frame-(\d+(?:\.\d+)?)(?:-\d+)?\.png$")
+FRAME_RE = re.compile(
+    r"^frame-(?:\d{8}-\d{6}-)?(\d+(?:\.\d+)?)(?:-\d+)?\.png$")
 T_RE = re.compile(r"^t=(\S+)")
 JUMP_LIMIT = 25.0
 Y_MIN, Y_MAX = -5.0, 30.0
 FPS_LIMIT = 20
 FPS_SUSTAIN_S = 3.0
+GROUP_GAP_S = 1.0
 
 
 def _float(s):
@@ -82,6 +94,32 @@ def _nearest_frame(frames, t):
     return min(frames, key=lambda f: abs(f["t"] - t))["name"]
 
 
+def _group_anomalies(anomalies):
+    """Merge consecutive same-rule anomalies into one entry.
+
+    Time-sorted input; an entry joins the open group for its
+    rule when it starts within GROUP_GAP_S of that group's
+    current end (other rules interleaved in time do not break
+    a group). The merged entry keeps the first entry's t and
+    detail, and gains t_end + count.
+    """
+    grouped = []
+    open_by_rule = {}
+    for a in anomalies:
+        a = dict(a)
+        a.setdefault("t_end", a["t"])
+        a.setdefault("count", 1)
+        g = open_by_rule.get(a["rule"])
+        if g is not None and a["t"] - g["t_end"] <= GROUP_GAP_S:
+            g["t_end"] = max(g["t_end"], a["t_end"])
+            g["count"] += 1
+        else:
+            grouped.append(a)
+            open_by_rule[a["rule"]] = a
+    grouped.sort(key=lambda x: x["t"])
+    return grouped
+
+
 def analyze_log(log_path, frames):
     """Parse one session log; frames is the dir's frame index."""
     build = None
@@ -103,6 +141,7 @@ def analyze_log(log_path, frames):
                 anomalies.append({
                     "rule": "fps_sustained",
                     "t": fps_run_start,
+                    "t_end": fps_run_last,
                     "detail": "fps < %d for %.1f s (t=%.2f..%.2f)"
                               % (FPS_LIMIT, span, fps_run_start,
                                  fps_run_last),
@@ -194,6 +233,7 @@ def analyze_log(log_path, frames):
     close_fps_run()
 
     anomalies.sort(key=lambda a: a["t"])
+    anomalies = _group_anomalies(anomalies)
     for a in anomalies:
         a["nearest_frame"] = _nearest_frame(frames, a["t"])
     for mk in markers:
@@ -251,8 +291,16 @@ def format_digest(session_dir):
         if d["anomalies"]:
             for a in d["anomalies"]:
                 nf = a.get("nearest_frame") or "none"
-                out.append("- t=%.2f [%s] %s (nearest frame: %s)"
-                           % (a["t"], a["rule"], a["detail"], nf))
+                if a.get("count", 1) > 1:
+                    out.append("- t=%.2f..%.2f [%s] ×%d %s "
+                               "(nearest frame: %s)"
+                               % (a["t"], a.get("t_end", a["t"]),
+                                  a["rule"], a["count"],
+                                  a["detail"], nf))
+                else:
+                    out.append("- t=%.2f [%s] %s (nearest frame: %s)"
+                               % (a["t"], a["rule"], a["detail"],
+                                  nf))
         else:
             out.append("None.")
         out.append("")

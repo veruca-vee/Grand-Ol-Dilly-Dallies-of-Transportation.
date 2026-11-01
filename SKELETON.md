@@ -335,6 +335,36 @@ and an actual simulator"
   sighting at a satisfying pace is **[unverified]** until Vee
   plays this build.
 
+## Fall fix + telemetry hardening status (2026-11-01, built + verified headless/Xvfb)
+
+- **Playtest bug (Vee's first LIVE telemetry sessions):** she
+  drove east past x=120 — where the ground slab ends — and
+  fell to y=-771, exiting the car mid-fall (archived session
+  `session-20261101-094432.log`, t≈44.6–55.5). No boundary,
+  no kill-plane. Her amendment to the fix, verbatim: "bonk
+  should send you flying like old mx vs atv logic."
+- **Fix (TDD, red first — 12 game FAILs, 2 naming FAILs,
+  4 parser FAILs recorded in README "Fall fix"):** invisible
+  CityBuilder walls at ±WORLD_HALF (nodes 796 → 801, budget
+  intact); kill-plane respawn at y=-20 to the nearest
+  building-clear road point, car + player together, NO
+  penalty (none specified, none invented), `RESPAWN` event;
+  edge **bonk**: impact ≥ 6 u/s reflects ×1.2 + 7.0 up-pop
+  via body-owned launch state, `BONK` event, slow contact
+  just blocks. Tuning in the data's new `edge` block.
+  Telemetry hardening: frame files are session-stamped
+  (`frame-<stamp>-<t>.png`, parser reads old names too) and
+  the digest groups consecutive same-rule anomalies — the
+  archived fall re-digests as ONE entry, ×22.
+- New line `AUTOTEST PASS: fall_respawn kill_plane_foot
+  kill_plane_car bonk_launch bonk_slow_block` — eighth
+  AUTOTEST line, green in project AND export, all prior
+  lines verbatim; 1200 frames zero script errors; Xvfb
+  screenshot visually unchanged. Build: 66,257,984 bytes,
+  sha256 f6c7c58c…916, zip `builds/GODOT-Linux-FallFix.zip`.
+  Real-hardware edge behaviour is **[unverified]** until
+  Vee drives off a cliff again.
+
 ## Gate 0 status (2026-10-29, verified)
 
 - Built in `engine/` (Godot 4.3): main/city/player/car/ped/enemy/bullet/

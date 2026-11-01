@@ -40,6 +40,7 @@ var dir_path: String = ""
 var frames: Array = []  # kept frame paths, oldest first
 
 var _file: FileAccess = null
+var _session_stamp: String = ""  # yyyymmdd-hhmmss of session start
 var _active: bool = false
 var _failed: bool = false
 var _start_msec: int = 0
@@ -69,6 +70,7 @@ func start_session(dir: String, build_label: String) -> bool:
 		int(dt.get("year", 0)), int(dt.get("month", 0)),
 		int(dt.get("day", 0)), int(dt.get("hour", 0)),
 		int(dt.get("minute", 0)), int(dt.get("second", 0))]
+	_session_stamp = stamp
 	session_path = dir_path + "/session-" + stamp + ".log"
 	_file = FileAccess.open(session_path, FileAccess.WRITE)
 	if _file == null:
@@ -151,7 +153,12 @@ func capture_now() -> bool:
 func capture_frame(image: Image) -> bool:
 	if not _active or image == null or image.is_empty():
 		return false
-	var stem := "frame-%.2f" % elapsed()
+	# Frame names carry the session stamp: every session in a
+	# shared dir writes the same frame-<t> names otherwise, and
+	# later sessions overwrite earlier sessions' frames (seen
+	# in the first live playtests, 2026-11-01). The digest
+	# parser reads both namings.
+	var stem := "frame-%s-%.2f" % [_session_stamp, elapsed()]
 	var path := dir_path + "/" + stem + ".png"
 	var n := 2
 	while FileAccess.file_exists(path):

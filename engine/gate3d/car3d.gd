@@ -27,6 +27,26 @@ var gravity: float = 22.0
 var hp: float = 100.0  # data: car.hp
 var max_hp: float = 100.0
 var dead: bool = false
+# Fall fix: edge-bonk launch state, set by gate3d_main via
+# apply_bonk. While launch_time runs, Y is ballistic — the
+# usual floor clamp would eat the up-pop in one frame. The
+# horizontal launch itself is carried by facing + speed,
+# which this body's physics already owns.
+var launch_time := 0.0
+
+# The bonk response: turn the car to face the reflected
+# travel direction, carry the (boosted) reflected speed, and
+# pop it upward. gate3d_main decides WHEN (edge contact at
+# speed); this decides what the car does with it.
+func apply_bonk(reflected_hv: Vector3, pop: float) -> void:
+	var d := reflected_hv
+	d.y = 0.0
+	if d.length() > 0.01:
+		var dirn := d.normalized()
+		rotation.y = atan2(-dirn.x, -dirn.z)
+		speed = d.length()
+	velocity.y = pop
+	launch_time = 0.5
 var main: Node = null
 var body_meshes: Array = []
 var front_pivots: Array[Node3D] = []  # Gate 3D-2: front wheels steer
@@ -168,7 +188,10 @@ func set_dead_visual() -> void:
 		m.material_override = _mat(Color(0.1, 0.1, 0.1))
 
 func _physics_process(delta: float) -> void:
-	if not is_on_floor():
+	if launch_time > 0.0:
+		launch_time -= delta
+		velocity.y -= gravity * delta
+	elif not is_on_floor():
 		velocity.y -= gravity * delta
 	else:
 		velocity.y = -0.5

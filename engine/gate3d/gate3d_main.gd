@@ -67,6 +67,11 @@ var combat := Combat.new()
 # stay as the historical record; these are the tuned 3D values).
 # Fallbacks in the kill paths are the HTML numbers.
 var wanted_gains: Dictionary = {}
+# Fall fix: world-edge tuning from the data's "edge" block
+# (kill-plane depth, bonk restitution / up-pop / min speed).
+# Fallbacks in _edge_val are these same values.
+var edge_cfg: Dictionary = {}
+var bonk_cooldown: float = 0.0
 var wanted_level: float:
 	get:
 		return wanted_sys.level
@@ -171,6 +176,7 @@ func _ready() -> void:
 		enemy_stats[e.get("type", "")] = e
 	wanted_cfg = data.get("wanted", {})
 	wanted_gains = wanted_cfg.get("gains", {})
+	edge_cfg = data.get("edge", {})
 	car_stats = data.get("car", {})
 	ped_stats = data.get("pedestrian", {})
 	base_hp_data = float(data.get("player", {}).get("base_hp", 100))
@@ -851,6 +857,120 @@ func _exit_car() -> void:
 		player.body_shape.disabled = false
 	refresh_hud()
 
+# ---------- Fall fix: kill-plane respawn + edge bonk ----------
+# From Vee's first LIVE telemetry sessions (2026-11-01,
+# session-20261101-094432.log): driving east she crossed
+# x=120, where the ground slab ends, and fell to y=-771.
+# Two layers now: CityBuilder's invisible walls keep bodies
+# in the world, and this layer decides what contact MEANS —
+# slow contact just stops at the wall; fast contact BONKS
+# (Vee's amendment: "bonk should send you flying like old
+# mx vs atv logic" — reflect with a boost plus an upward
+# pop). The kill-plane below stays as the backstop for
+# anything that still gets out. No penalty anywhere: none
+# was specified, so none was invented.
+func _edge_val(key: String, fallback: float) -> float:
+	return float(edge_cfg.get(key, fallback))
+
+func _check_fall_and_edge(delta: float) -> void:
+	if bonk_cooldown > 0.0:
+		bonk_cooldown -= delta
+	var actor: CharacterBody3D = player.driving if player.driving != null else player
+	if actor == null:
+		return
+	# kill-plane: the backstop
+	if actor.global_position.y < _edge_val("kill_plane_y", -20.0):
+		_respawn_actor(actor.global_position)
+		return
+	if bonk_cooldown > 0.0:
+		return
+	# Which edge, if any, is the actor pressed against? The
+	# walls sit at ±WORLD_HALF; contact leaves the actor's
+	# origin within a body-radius of the line.
+	var pos := actor.global_position
+	var margin := 2.8 if player.driving != null else 1.2
+	var inward := Vector3.ZERO
+	if pos.x > CityBuilder.WORLD_HALF - margin:
+		inward = Vector3(-1, 0, 0)
+	elif pos.x < -CityBuilder.WORLD_HALF + margin:
+		inward = Vector3(1, 0, 0)
+	elif pos.z > CityBuilder.WORLD_HALF - margin:
+		inward = Vector3(0, 0, -1)
+	elif pos.z < -CityBuilder.WORLD_HALF + margin:
+		inward = Vector3(0, 0, 1)
+	if inward == Vector3.ZERO or not actor.is_on_wall():
+		return
+	# Intended horizontal velocity: for the car, the speed it
+	# is actually carrying (its scalar survives the slide);
+	# on foot, what the input is asking for (the slide has
+	# already eaten the velocity itself by the time we look).
+	var hv := Vector3.ZERO
+	if player.driving != null:
+		var car := player.driving
+		hv = -car.global_transform.basis.z * car.speed
+		hv.y = 0.0
+	else:
+		var iv := Controller.read_walk_input()
+		if not is_nan(player.move_override.x):
+			iv = player.move_override
+		hv = Controller.move_dir(iv, cam_yaw) * player.walk_speed
+	var impact := hv.dot(-inward)
+	if impact < _edge_val("bonk_min_speed", 6.0):
+		return  # slow touch: the wall just blocks, as walls do
+	var reflected := hv.bounce(inward) * _edge_val("bonk_restitution", 1.2)
+	var pop := _edge_val("bonk_up_pop", 7.0)
+	if player.driving != null:
+		player.driving.apply_bonk(reflected, pop)
+	else:
+		player.apply_launch(Vector3(reflected.x, 0, reflected.z), pop)
+	bonk_cooldown = 0.75
+	_telemetry_event("BONK", {"speed": impact, "x": pos.x, "z": pos.z})
+
+func _respawn_actor(from_pos: Vector3) -> void:
+	var in_car := player.driving != null
+	var spot := _respawn_point(from_pos, 2.2 if in_car else 1.0)
+	if in_car:
+		var car := player.driving
+		car.global_position = spot
+		car.velocity = Vector3.ZERO
+		car.speed = 0.0
+		car.rotation = Vector3(0, car.rotation.y, 0)
+	else:
+		player.global_position = spot
+		player.velocity = Vector3.ZERO
+	_telemetry_event("RESPAWN", {"in_car": in_car})
+	refresh_hud()
+
+# Nearest point on a road centreline to `from`, walked along
+# the line until it clears every building footprint; the
+# player spawn point is the final fallback. Ground height is
+# the game's spawn height (bodies settle the last fraction).
+func _respawn_point(from: Vector3, clearance: float) -> Vector3:
+	var pitch := CityBuilder.PITCH
+	var kx := clampi(roundi(from.x / pitch), -2, 2)
+	var kz := clampi(roundi(from.z / pitch), -2, 2)
+	var snap_x := absf(from.x - kx * pitch) <= absf(from.z - kz * pitch)
+	var cand := Vector3(clampf(from.x, -112.0, 112.0), 0.2, clampf(from.z, -112.0, 112.0))
+	if snap_x:
+		cand.x = kx * pitch
+	else:
+		cand.z = kz * pitch
+	for off in [0.0, 13.0, -13.0, 26.0, -26.0, 39.0, -39.0]:
+		var p := cand
+		if snap_x:
+			p.z = clampf(cand.z + off, -112.0, 112.0)
+		else:
+			p.x = clampf(cand.x + off, -112.0, 112.0)
+		if _point_clear(p, clearance):
+			return p
+	return Vector3(0, 0.2, 8)
+
+func _point_clear(p: Vector3, clearance: float) -> bool:
+	for r in buildings:
+		if r.grow(clearance).has_point(Vector2(p.x, p.z)):
+			return false
+	return true
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		# Telemetry: F9 is Vee's "it broke right here" button —
@@ -895,6 +1015,7 @@ func _physics_process(_delta: float) -> void:
 	if player == null or state != "PLAYING" or shop_open:
 		return
 	frame_counter += 1
+	_check_fall_and_edge(_delta)
 	# Gate 3D-2: periodic autosave (30 s of physics frames)
 	if not autotest:
 		save_frames += 1
@@ -1548,8 +1669,13 @@ func _run_autotest() -> void:
 			txt = FileAccess.get_file_as_string(dl.session_path)
 			if not txt.contains("t=20.00 EVENT MARKER"):
 				fails6.append("telemetry_log: marker() wrote no MARKER event")
-			if dl.frames.size() != 1 or not str(dl.frames[0]).ends_with("frame-20.00.png"):
-				fails6.append("telemetry_log: marker() kept frames %s, expected one frame-20.00.png" % str(dl.frames))
+			# Fall fix: frame files carry the session stamp, so
+			# sessions sharing one dir cannot overwrite each
+			# other's frames (Vee's first live sessions did).
+			var stamp := str(dl.session_path).get_file().trim_prefix("session-").trim_suffix(".log")
+			var first_frame_path := str(dl.frames[0]) if dl.frames.size() > 0 else ""
+			if dl.frames.size() != 1 or not first_frame_path.ends_with("-20.00.png") or not first_frame_path.contains(stamp):
+				fails6.append("telemetry_log: marker() kept frames %s, expected one frame-<session-stamp>-20.00.png" % str(dl.frames))
 			# an empty image is refused (headless safety)
 			if dl.capture_frame(Image.new()):
 				fails6.append("telemetry_log: capture_frame accepted an empty image")
@@ -1561,10 +1687,10 @@ func _run_autotest() -> void:
 					fails6.append("telemetry_log: capture_frame refused a real image at t=%.0f" % ft)
 			if dl.frames.size() != 3:
 				fails6.append("telemetry_log: rotation kept %d frames, expected the cap of 3" % dl.frames.size())
-			if FileAccess.file_exists(tdir + "/frame-20.00.png"):
+			if first_frame_path != "" and FileAccess.file_exists(first_frame_path):
 				fails6.append("telemetry_log: rotation did not delete the oldest frame file")
-			if not FileAccess.file_exists(tdir + "/frame-33.00.png"):
-				fails6.append("telemetry_log: newest frame file frame-33.00.png missing")
+			if not FileAccess.file_exists(tdir + "/frame-" + stamp + "-33.00.png"):
+				fails6.append("telemetry_log: newest frame file frame-<session-stamp>-33.00.png missing")
 			dl.end_session()
 		_telemetry_test_wipe(tdir)
 	# wiring: the game itself started a session at _ready, ticks
@@ -1592,15 +1718,12 @@ func _run_autotest() -> void:
 			gtxt = FileAccess.get_file_as_string(gpath)
 			if not gtxt.contains("EVENT MARKER"):
 				fails6.append("telemetry_log: F9 produced no MARKER event in the game session")
-			# BUSTED is the last wiring check: it reloads the
-			# scene on a 2.5 s timer, and the prints + quit below
-			# land well before that fires.
-			on_player_death()
-			gtxt = FileAccess.get_file_as_string(gpath)
-			if not gtxt.contains("EVENT BUSTED"):
-				fails6.append("telemetry_log: player death wrote no BUSTED event")
-			if FileAccess.file_exists(save_path):
-				DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path))
+			# The BUSTED wiring check used to run here, dead
+			# last in this section — it now runs at the very
+			# END of the autotest (after section 12): death
+			# reloads the scene on a 2.5 s timer, and the
+			# fall/bonk checks need more physics time than
+			# that leaves (see the note at the BUSTED block).
 
 	# --- 11. Wanted pacing (2026-11-01, Vee's real playtest:
 	# many ped kills, never a star, never a cop) ---
@@ -1648,6 +1771,235 @@ func _run_autotest() -> void:
 	if absf(wanted_level - 0.95) > 0.01:
 		fails7.append("wanted_pacing: decay from 1.20 after 601 crime-free frames gave %.2f, expected ~0.95 (one partial decay_step)" % wanted_level)
 
+	# --- 12. Fall fix (2026-11-01, Vee's first LIVE telemetry
+	# sessions, session-20261101-094432.log): driving east in a
+	# car at z≈-38 she crossed x=120 — the ground slab just ends
+	# there, no boundary, no kill-plane — and fell to y=-771,
+	# exiting the car mid-fall. Contract: (a) below the kill
+	# plane, an on-foot player respawns on a road, velocity
+	# zeroed, RESPAWN logged; (b) in a car, car + player
+	# respawn together, still in the car; (c) the world edge
+	# BONKS (Vee's amendment: "bonk should send you flying
+	# like old mx vs atv logic") — a high-speed hit launches
+	# the actor back inward, boosted, with an upward pop, and
+	# the kill-plane does NOT fire; (d) slow contact just
+	# blocks: no launch, no velocity explosion.
+	var fails8: Array[String] = []
+	for e in enemies.duplicate():
+		e.queue_free()
+	enemies.clear()
+	wanted_level = 0.0
+	if player.driving != null:
+		_exit_car()
+	var dl_game = get("debug_log")
+	var sess_text := func() -> String:
+		if dl_game == null:
+			return ""
+		var p := str(dl_game.session_path)
+		if p == "" or not FileAccess.file_exists(p):
+			return ""
+		return FileAccess.get_file_as_string(p)
+	# (a) kill-plane, on foot
+	var respawns0: int = sess_text.call().count("EVENT RESPAWN")
+	player.global_position = Vector3(30, -30, -38)
+	player.velocity = Vector3(0, -50, 0)
+	# 16 frames: the respawn fires on the first tick, then the
+	# body still has to settle its last ~0.1 u onto the road —
+	# at 6 frames it is measurably mid-settle (vy ≈ -2.3), which
+	# is the drop, not a failed respawn.
+	for i in range(16):
+		await get_tree().physics_frame
+	if player.global_position.y < -1.0:
+		fails8.append("fall_respawn: on-foot fall to y=-30 left the player at y=%.2f (no respawn)" % player.global_position.y)
+	if absf(player.velocity.y) > 1.0:
+		fails8.append("fall_respawn: respawned player still falling (vy=%.2f)" % player.velocity.y)
+	if not city.is_asphalt(player.global_position.x, player.global_position.z):
+		fails8.append("fall_respawn: respawn point %s is not on a road" % str(player.global_position))
+	if sess_text.call().count("EVENT RESPAWN") != respawns0 + 1:
+		fails8.append("fall_respawn: no RESPAWN telemetry event for the on-foot fall")
+	# (b) kill-plane, in a car
+	player.global_position = cars[1].global_position + Vector3(1, 0.3, 0)
+	_try_enter_car()
+	if player.driving == null:
+		fails8.append("fall_respawn: autotest could not enter the fall-test car")
+	else:
+		var dcar := player.driving
+		dcar.global_position = Vector3(60, -30, 40)
+		dcar.velocity = Vector3(0, -50, 0)
+		dcar.speed = 0.0
+		for i in range(16):
+			await get_tree().physics_frame
+		if dcar.global_position.y < -1.0:
+			fails8.append("fall_respawn: car fell to y=-30 and kept falling (car y=%.2f, no respawn)" % dcar.global_position.y)
+		if player.driving != dcar:
+			fails8.append("fall_respawn: car respawn ejected the player")
+		if player.global_position.y < -1.0:
+			fails8.append("fall_respawn: player did not come with the car (player y=%.2f)" % player.global_position.y)
+		if not city.is_asphalt(dcar.global_position.x, dcar.global_position.z):
+			fails8.append("fall_respawn: car respawn point %s is not on a road" % str(dcar.global_position))
+		if absf(dcar.velocity.y) > 1.0:
+			fails8.append("fall_respawn: respawned car still falling (vy=%.2f)" % dcar.velocity.y)
+		if sess_text.call().count("EVENT RESPAWN") != respawns0 + 2:
+			fails8.append("fall_respawn: no RESPAWN telemetry event for the in-car fall")
+		_exit_car()
+	# a clear eastbound lane to the +X wall, from the built city
+	var lane_z := 0.0
+	var lane_found := false
+	for cand_z in [0.0, 52.0, -52.0, 104.0, -104.0, 26.0, -26.0, 78.0, -78.0]:
+		var blocked := false
+		for r in buildings:
+			if Rect2(96, cand_z - 1.6, 26, 3.2).intersects(r):
+				blocked = true
+				break
+		if not blocked:
+			lane_z = cand_z
+			lane_found = true
+			break
+	if not lane_found:
+		fails8.append("bonk: no clear lane to the +X wall in the built city")
+	# (c) bonk at speed, in a car
+	player.global_position = cars[2].global_position + Vector3(1, 0.3, 0)
+	_try_enter_car()
+	if player.driving == null:
+		fails8.append("bonk: autotest could not enter the bonk-test car")
+	else:
+		var bc := player.driving
+		var respawns_before_bonk: int = sess_text.call().count("EVENT RESPAWN")
+		var bonks0: int = sess_text.call().count("EVENT BONK")
+		bc.global_position = Vector3(112, 0.25, lane_z)
+		bc.rotation.y = -PI / 2.0  # face +X (forward = -basis.z)
+		bc.velocity = Vector3.ZERO
+		bc.speed = 0.0
+		var bonk_seen := false
+		var max_y := 0.25
+		for i in range(70):
+			bc.speed = 20.0  # held throttle (scaffolding, like section 8)
+			await get_tree().physics_frame
+			max_y = maxf(max_y, bc.global_position.y)
+			if sess_text.call().count("EVENT BONK") > bonks0:
+				bonk_seen = true
+				break
+		if not bonk_seen:
+			fails8.append("bonk: car hit the +X edge at speed 20 and no BONK fired (pos %s, speed %.1f)" % [str(bc.global_position), bc.speed])
+		else:
+			var fwd := -bc.global_transform.basis.z
+			if fwd.x > -0.7:
+				fails8.append("bonk: post-bonk facing %s does not point back into the world (-X)" % str(fwd))
+			if bc.speed < 20.0:
+				fails8.append("bonk: post-bonk speed %.1f < impact 20 (no boost)" % bc.speed)
+			for i in range(90):
+				await get_tree().physics_frame
+				max_y = maxf(max_y, bc.global_position.y)
+				if bc.is_on_floor() and bc.global_position.y < 1.0 and i > 10:
+					break
+			if max_y < 0.8:
+				fails8.append("bonk: car never left the ground (max y %.2f, no up-pop)" % max_y)
+			if absf(bc.global_position.x) > CityBuilder.WORLD_HALF or absf(bc.global_position.z) > CityBuilder.WORLD_HALF:
+				fails8.append("bonk: car ended outside the world at %s" % str(bc.global_position))
+			if bc.global_position.y < -1.0 or bc.global_position.y > 2.0:
+				fails8.append("bonk: car did not land back on the ground (y=%.2f)" % bc.global_position.y)
+			if sess_text.call().count("EVENT RESPAWN") != respawns_before_bonk:
+				fails8.append("bonk: kill-plane fired during a normal bonk (it is the backstop, not the bouncer)")
+		bc.speed = 0.0
+		_exit_car()
+	# (d) slow contact: car at 4 u/s, then walking pace on foot
+	player.global_position = cars[3].global_position + Vector3(1, 0.3, 0)
+	_try_enter_car()
+	if player.driving == null:
+		fails8.append("bonk: autotest could not enter the slow-test car")
+	else:
+		var sc := player.driving
+		var bonks1: int = sess_text.call().count("EVENT BONK")
+		sc.global_position = Vector3(117, 0.25, lane_z)
+		sc.rotation.y = -PI / 2.0
+		sc.velocity = Vector3.ZERO
+		sc.speed = 0.0
+		for i in range(50):
+			sc.speed = 4.0
+			await get_tree().physics_frame
+		if sess_text.call().count("EVENT BONK") != bonks1:
+			fails8.append("bonk: a slow (4 u/s) wall touch launched the car")
+		if absf(sc.global_position.x) > CityBuilder.WORLD_HALF:
+			fails8.append("bonk: slow car left the world (x=%.2f)" % sc.global_position.x)
+		if sc.speed > 4.01:
+			fails8.append("bonk: slow car speed exploded to %.2f" % sc.speed)
+		sc.speed = 0.0
+		_exit_car()
+		# move the slow car out of the lane: left at the wall it
+		# blocks the on-foot checks below (they would ram the car,
+		# not the edge — probe-verified in the first RED run)
+		sc.global_position = Vector3(-30, 0.2, 18)
+		sc.velocity = Vector3.ZERO
+	player.global_position = Vector3(118.5, 0.2, lane_z)
+	player.velocity = Vector3.ZERO
+	cam_yaw = -PI / 2.0  # camera forward = +X, toward the wall
+	var bonks2: int = sess_text.call().count("EVENT BONK")
+	player.move_override = Vector2(0, 1)
+	for i in range(40):
+		await get_tree().physics_frame
+	player.move_override = Vector2(NAN, NAN)
+	if sess_text.call().count("EVENT BONK") != bonks2:
+		fails8.append("bonk: walking into the edge launched the player")
+	if absf(player.global_position.x) > CityBuilder.WORLD_HALF:
+		fails8.append("bonk: walking player left the world (x=%.2f)" % player.global_position.x)
+	# (e) bonk at speed, on foot
+	player.global_position = Vector3(113, 0.2, lane_z)
+	player.velocity = Vector3.ZERO
+	player.walk_speed = 14.0  # scaffolding: sprint upgrades stack walk speed; 14 makes the impact unambiguous
+	cam_yaw = -PI / 2.0
+	var bonks3: int = sess_text.call().count("EVENT BONK")
+	var respawns3: int = sess_text.call().count("EVENT RESPAWN")
+	player.move_override = Vector2(0, 1)
+	var foot_bonk := false
+	var peak_vy := 0.0
+	var peak_inward := 0.0
+	for i in range(60):
+		await get_tree().physics_frame
+		peak_vy = maxf(peak_vy, player.velocity.y)
+		peak_inward = maxf(peak_inward, -player.velocity.x)
+		if sess_text.call().count("EVENT BONK") > bonks3:
+			foot_bonk = true
+			break
+	player.move_override = Vector2(NAN, NAN)
+	if not foot_bonk:
+		fails8.append("bonk: on-foot impact at 14 u/s did not launch (pos %s)" % str(player.global_position))
+	else:
+		if peak_inward < 14.0:
+			fails8.append("bonk: on-foot launch inward speed peaked at %.1f, expected >= impact 14" % peak_inward)
+		if peak_vy <= 0.0:
+			fails8.append("bonk: on-foot launch had no upward pop (peak vy %.2f)" % peak_vy)
+		for i in range(80):
+			await get_tree().physics_frame
+			if player.is_on_floor() and player.global_position.y < 1.0 and i > 8:
+				break
+		if absf(player.global_position.x) > CityBuilder.WORLD_HALF or absf(player.global_position.z) > CityBuilder.WORLD_HALF:
+			fails8.append("bonk: launched player landed outside the world at %s" % str(player.global_position))
+		if player.global_position.y < -1.0 or player.global_position.y > 2.0:
+			fails8.append("bonk: launched player did not land on the ground (y=%.2f)" % player.global_position.y)
+		if sess_text.call().count("EVENT RESPAWN") != respawns3:
+			fails8.append("bonk: kill-plane fired during the on-foot bonk")
+	player.walk_speed = 5.0
+
+	# --- BUSTED wiring (moved from section 10): player death
+	# starts a 2.5 s scene-reload timer, so this runs dead last;
+	# sections 11-12 need real physics time and cannot live
+	# downstream of that timer (probe-verified 2026-11-01: with
+	# BUSTED in section 10, the timer fired mid-section-12 and
+	# the autotest looped scene reloads forever, printing
+	# nothing). The prints + quit below land well before it
+	# fires.
+	var gdl2 = get("debug_log")
+	if gdl2 == null:
+		fails6.append("telemetry_log: game has no debug_log (telemetry not wired)")
+	else:
+		var gpath2: String = gdl2.session_path
+		on_player_death()
+		var gtxt2 := FileAccess.get_file_as_string(gpath2)
+		if not gtxt2.contains("EVENT BUSTED"):
+			fails6.append("telemetry_log: player death wrote no BUSTED event")
+		if FileAccess.file_exists(save_path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path))
+
 	if fails.is_empty():
 		print("AUTOTEST PASS: smg_ped_kill cash+score+combo | smg_cop_damage+kill | wanted_floor caps spawn_types | driveby_cooldown_ticks")
 	else:
@@ -1683,4 +2035,9 @@ func _run_autotest() -> void:
 	else:
 		for f in fails7:
 			print("AUTOTEST FAIL: ", f)
-	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() and fails6.is_empty() and fails7.is_empty() else 1)
+	if fails8.is_empty():
+		print("AUTOTEST PASS: fall_respawn kill_plane_foot kill_plane_car bonk_launch bonk_slow_block")
+	else:
+		for f in fails8:
+			print("AUTOTEST FAIL: ", f)
+	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() and fails6.is_empty() and fails7.is_empty() and fails8.is_empty() else 1)
