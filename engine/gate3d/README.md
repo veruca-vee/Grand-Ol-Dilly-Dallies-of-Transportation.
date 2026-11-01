@@ -978,3 +978,174 @@ Real-hardware edge behaviour is **[unverified]** until Vee
 drives off a cliff again: the tests prove the respawn and
 the launch contracts; whether the bonk *feels* like MX vs
 ATV is hers to judge.
+
+## Assets Step 1 — Kenney fleet (2026-11-01)
+
+Spec: `design/ASSETS1_SPEC.md`; plan + tasks:
+`design/ASSETS1_PLAN.md`. Direction is Vee's (2026-11-01):
+"a = step 1, b = step 2, or basically c" — Kenney cars
+first, city kits second, phased hybrid. The fleet is models
+now: Kenney Car Kit GLBs (CC0, licence verified on the
+source page and in the zip — `design/ASSET_RESEARCH.md`),
+imported through the pipeline the research gate proved.
+
+### Contract supersession — on the record, in plain words
+
+Detail Pass 1's `car_variants` checks asserted a procedural
+fleet: at least 3 `body_style` silhouettes, a paint palette
+of at least 8 colours, at least 3 paints visible on spawned
+cars, and wheel spin on procedural wheel nodes. **Those
+four sub-checks are superseded and removed.** What changed:
+the procedural bodies they described no longer exist — Vee
+decided (2026-11-01, above) that the fleet becomes Kenney
+GLB models, and a test asserting box silhouettes and paint
+palettes would be asserting a fleet she retired. Why this
+is not a silent weakening: the contract's *intent* — the
+fleet is varied, honestly scaled, and its wheels really
+spin and steer — moved, strengthened, to section 13 and the
+new line `AUTOTEST PASS: assets1 kenney_fleet scale
+wheels_spin atlas` (>= 5 distinct models instead of 3 box
+styles; per-car visual-length assertion instead of a
+palette count; spin AND steer asserted on the GLB's own
+wheel nodes; the atlas proven in the tree, on a car at
+runtime, and inside the exported binary run from a clean
+directory). The `detail1` PASS line still prints verbatim
+(`... walk_cycle car_variants signage density_budget`) and
+keeps asserting walk_cycle / signage / density_budget; the
+supersession comment also sits at the old check site in
+`gate3d_main.gd`. The procedural builder itself
+(`_box`/`_glass_mat`/`_light_mat`, `PALETTE`, `paint_colors`,
+`body_style`, `car_color`) is **deleted** from `car3d.gd`,
+not bypassed — spec statement 1: not left as a second fleet.
+
+### RED (recorded before implementation, exit 1)
+
+All 8 prior AUTOTEST lines PASS above these, verbatim:
+
+```
+AUTOTEST FAIL: kenney_fleet: 0 distinct GLB models across the fleet, expected >= 5
+AUTOTEST FAIL: atlas: res://assets/kenney_car_kit/Textures/colormap.png is missing from the tree
+AUTOTEST FAIL: atlas: no textured material found on the first fleet car at runtime
+AUTOTEST FAIL: wheels_spin: fleet car exposes no GLB wheel nodes
+```
+
+(The scale sub-check passed incidentally in red — the
+procedural bodies were already collision-sized; the section
+failed for the four reasons above, which are the gate's
+actual subject.)
+
+### Probe findings (imported scenes, Godot space)
+
+- Kit nose is **+Z**: `wheel-front-*` sit at positive Z,
+  all node rotations identity. Car3D's forward is -Z, so
+  the model root turns PI; wheel spin sign is set from the
+  axis math for the flipped root (`rotation.x =
+  -spin_angle` — the roll direction was verified in the
+  Xvfb frames), steering keeps `steer_visual`'s sign.
+- Wheel centres at native y 0.30, radius 0.30: at x1.55
+  the tyres touch y=0 exactly at the car origin.
+- Every mesh's material resolves to
+  `res://assets/kenney_car_kit/Textures/colormap.png` —
+  the shared atlas, folder structure preserved as copied.
+
+### What shipped
+
+- **Fleet (in `cars[]`, drivable, collision untouched):**
+  sedan, hatchback-sports, taxi, van, truck, sedan-sports
+  over the six existing spots. `Car3D.model_name` is set
+  by the spawner before `add_child` (the old `body_style`
+  seam); `_ready` instances the GLB at x1.55 as a visual
+  child. Physics, speeds, enter/exit, run-over, bonk,
+  kill-plane: the same code paths as before the gate.
+- **Wheels:** the kit nodes (`wheel-front-left/right`,
+  `wheel-back-left/right`) are collected into `glb_wheels`
+  and driven from the existing spin state with
+  `WHEEL_R = 0.465` (the GLB wheel radius at scale — roll
+  rate stays honest); front wheels also yaw with
+  `steer_visual`. Extras (spoiler, grill, doors, the SUV's
+  spare) are ignored. `set_dead_visual()` darkens the
+  model's non-wheel meshes via per-node material override;
+  the shared atlas material is never mutated.
+- **Test seam:** `Car3D.drive_override`, mirroring
+  `Player3D.move_override` (NaN = real input), so the
+  autotest steers through the same code path as a player.
+- **Service dressing:** ambulance, firetruck,
+  garbage-truck, police as static GLB instances with a
+  plain collision box at inter-pad slab spots. They are
+  deliberately NOT `Car3D`: their native lengths
+  (3.25–3.45) would put a x1.55 visual 26–34 % past the
+  fleet's 4.0 collision box, and spec statement 1 names
+  them parked dressing. Making them drivable is a later
+  gameplay decision, recorded here rather than dropped.
+  (There are no AI-driven cars in this build to convert —
+  traffic is the parked fleet; pursuers are on foot. The
+  police GLB appears parked only, per spec's out-of-scope
+  note; enemy cars are a gameplay gate.)
+- **Copied into `engine/assets/kenney_car_kit/`** (10
+  models, 2.0 MB total): `sedan.glb`, `sedan-sports.glb`,
+  `hatchback-sports.glb`, `taxi.glb`, `van.glb`,
+  `truck.glb`, `ambulance.glb`, `firetruck.glb`,
+  `garbage-truck.glb`, `police.glb`, plus
+  `Textures/colormap.png` and `License.txt`. The other 40
+  kit models stay in `assets-src/` only.
+- A `--carshot` debug flag (mirrors `--markshot`) frames
+  the first fleet car for the visual check.
+
+### One test-design correction, documented not hidden
+
+The first clean-dir export run failed exactly one check:
+`atlas: ... colormap.png is missing from the tree`. The
+export log showed the atlas packed as
+`.godot/imported/colormap.png-8f10….ctex` plus its
+`.import` remap — the atlas *did* travel; the probe was
+wrong. `FileAccess.file_exists` checks the literal path,
+which a packed build stores only in remapped form. The
+check now uses `ResourceLoader.exists`, which follows the
+remap and answers the actual contract in both worlds. The
+companion runtime check (a car's material really carries
+a texture) passed in the export all along and is
+unchanged.
+
+### REFACTOR step
+
+Considered per METHOD: the only repeated shape is the
+two-line GLB load in the fleet spawn and the dressing
+placement — extracting a helper would touch more than it
+saves, so no refactor was taken and the suite stands as
+green from the GREEN step.
+
+### Validation
+
+- Project autotest: **9 PASS lines** (8 prior verbatim +
+  assets1), exit 0. Smoketest: all 5 lines verbatim.
+- Node census: **801 -> 724** (budget < 900; a GLB car is
+  ~10 nodes against the procedural ~29). MultiMesh
+  instances ~1,320, unchanged. Instanced fleet + dressing
+  triangles: **23,443** total across all 10 models
+  (counted from the GLBs) — nothing to an UHD 600.
+- 1200-frame headless run: exit 0, **0 script errors**
+  (311 known "m is null" dummy-renderer artifacts).
+- Xvfb: `--carshot` frames the sedan textured — PIL:
+  9,123 unique colours, 1,163 sedan-red pixels (fog
+  washes the count; the colour is atlas colour, not a
+  fallback). `--screenshot` street scene: 7,376 unique
+  colours, city unchanged. The exported binary's own
+  `--carshot` from the clean dir: 8,628 unique colours,
+  sedan-red present.
+- Export: `builds/GODOT-Linux/GODOT.x86_64`, 66,944,080
+  bytes, sha256
+  `1cedd8e39b779aac6d6f7d5c6535f26a215d626bba422c0914b78f43d9d67809`.
+  **Clean-dir proof:** copied to `/tmp/clean-run`, run
+  there — full autotest PASS (all 9 lines, exit 0) and
+  300 frames clean, with no access to the source tree:
+  the atlas travels (spec statement 4).
+- Zip: `builds/GODOT-Linux-Assets1.zip` (24,997,428
+  bytes, sha256
+  `2c4ca07051824afcdf96db04f1a812e39f38ddffe0eb9fef019edf9220e65ce7`).
+
+The look on iwantitnow is **[unverified]** until Vee sees
+the fleet on her screen — the tests prove models, scale,
+spin, steer and texture; whether Kenney's chibi proportions
+*feel* right next to the flap-heads is hers to judge.
+Step 2 (city kits: roads + buildings) is next, per her
+phased call.

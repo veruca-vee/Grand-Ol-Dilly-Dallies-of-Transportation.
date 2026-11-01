@@ -365,6 +365,38 @@ and an actual simulator"
   Real-hardware edge behaviour is **[unverified]** until
   Vee drives off a cliff again.
 
+## Assets Step 1 status (2026-11-01, built + verified headless/Xvfb/clean-dir export)
+
+- **Vee's phased call:** "a = step 1, b = step 2, or
+  basically c" — Kenney Car Kit now, city kits next.
+  Spec `design/ASSETS1_SPEC.md`, plan
+  `design/ASSETS1_PLAN.md`.
+- **Fleet is GLBs:** sedan / hatchback-sports / taxi /
+  van / truck / sedan-sports drivable at x1.55 over the
+  existing 4.0 collision (physics untouched); the kit's
+  own wheel nodes spin (r = 0.465) and steer; ambulance /
+  firetruck / garbage-truck / police parked as static
+  dressing (not drivable — their lengths break the
+  scale honesty; recorded, not dropped). Procedural car
+  builder DELETED, not bypassed.
+- **Supersession, on the record:** Detail 1's
+  `car_variants` sub-checks (3 box silhouettes / palette)
+  retired with the fleet they described; the contract
+  moved to `AUTOTEST PASS: assets1 kenney_fleet scale
+  wheels_spin atlas` — ninth AUTOTEST line, green in
+  project AND clean-dir export, all prior lines
+  verbatim, detail1 line still prints. RED recorded
+  (4 FAILs). One probe correction documented (atlas
+  check: FileAccess → ResourceLoader, the export stores
+  the atlas as .ctex + remap).
+- Nodes 801 → 724 (budget < 900); fleet + dressing
+  23,443 tris; 1200 frames zero script errors; Xvfb
+  carshot textured (9,123 colours). Build: 66,944,080
+  bytes, sha256 1cedd8e3…67809, zip
+  `builds/GODOT-Linux-Assets1.zip`. The look on
+  iwantitnow is **[unverified]** until Vee sees it.
+  **Step 2 (city kits) is next.**
+
 ## Gate 0 status (2026-10-29, verified)
 
 - Built in `engine/` (Godot 4.3): main/city/player/car/ped/enemy/bullet/

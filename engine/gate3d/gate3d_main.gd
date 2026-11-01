@@ -26,6 +26,7 @@ var ped_stats: Dictionary = {}
 
 var player: Player3D = null
 var cars: Array[Car3D] = []
+var service_vehicles: Array = []  # Assets Step 1 parked dressing (static)
 var enemies: Array = []  # Enemy3D / Tank3D, duck-typed like the 2D code
 var buildings: Array = []  # Rect2 XZ footprints, for spawn placement
 var camera: Camera3D = null
@@ -210,11 +211,13 @@ func _ready() -> void:
 	player.weapon_index = int(DataLoader.load_json("res://data/weapons.json").get("player_start_weapon_index", 1))
 	player.refresh_gun(weapons[player.weapon_index])
 	var car_spots := [Vector3(4, 0.2, -2), Vector3(-14, 0.2, -30), Vector3(20, 0.2, 24), Vector3(-30, 0.2, 18), Vector3(30, 0.2, -34), Vector3(-24, 0.2, 44)]
+	# Assets Step 1: the fleet is Kenney Car Kit models now
+	# (ASSETS1_SPEC statement 1) — six distinct GLBs over the
+	# six spots, deterministic like the Detail 1 spread was.
+	var car_models := ["sedan", "hatchback-sports", "taxi", "van", "truck", "sedan-sports"]
 	for i in range(car_spots.size()):
 		var car := Car3D.new()
-		# Detail Pass 1: deterministic spread of silhouettes + paints
-		car.body_style = i % 3
-		car.car_color = Car3D.PALETTE[i % Car3D.PALETTE.size()]
+		car.model_name = car_models[i]
 		car.position = car_spots[i]
 		car.rotation.y = randf() * TAU
 		car.main = self
@@ -222,6 +225,38 @@ func _ready() -> void:
 		car.max_hp = car.hp
 		add_child(car)
 		cars.append(car)
+	# Assets Step 1: service vehicles as parked street
+	# dressing (spec statement 1) — static GLB instances with
+	# a plain collision box (NOT Car3D: their native lengths
+	# break the fleet's scale honesty at x1.55, and making
+	# them drivable is a gameplay call for a later gate; see
+	# ASSETS1_PLAN). Spots sit in the inter-pad slab strips,
+	# clear of the road centrelines the bonk lanes use.
+	# [model, spot, facing, collision length]
+	var service_spots := [
+		["ambulance", Vector3(26, 0.2, -8), 0.0, 5.0],
+		["firetruck", Vector3(-26, 0.2, 30), 0.0, 5.3],
+		["garbage-truck", Vector3(30, 0.2, 26), PI / 2.0, 5.35],
+		["police", Vector3(-30, 0.2, -26), PI / 2.0, 4.8],
+	]
+	for s in service_spots:
+		var holder := Node3D.new()
+		holder.position = s[1]
+		holder.rotation.y = s[2]
+		var inst: Node3D = (load("res://assets/kenney_car_kit/%s.glb" % s[0]) as PackedScene).instantiate()
+		inst.scale = Vector3.ONE * Car3D.MODEL_SCALE
+		inst.rotation.y = PI  # kit nose is +Z; holder faces -Z
+		holder.add_child(inst)
+		var sbody := StaticBody3D.new()
+		var scol := CollisionShape3D.new()
+		var sbox := BoxShape3D.new()
+		sbox.size = Vector3(2.4, 2.4, s[3])
+		scol.shape = sbox
+		scol.position = Vector3(0, 1.1, 0)
+		sbody.add_child(scol)
+		holder.add_child(sbody)
+		add_child(holder)
+		service_vehicles.append(holder)
 	for i in range(8):
 		var ped := Ped3D.new()
 		ped.position = Vector3((randf() - 0.5) * 90, 0.2, (randf() - 0.5) * 90)
@@ -238,11 +273,35 @@ func _ready() -> void:
 		_take_screenshot()
 	if "--markshot" in args or "--markshot" in OS.get_cmdline_args():
 		_take_markshot()
+	if "--carshot" in args or "--carshot" in OS.get_cmdline_args():
+		_take_carshot()
 	if "--countnodes" in args or "--countnodes" in OS.get_cmdline_args():
 		var counts := _scene_counts()
 		print("NODECOUNT: nodes=", counts.x, " multimesh_instances=", counts.y)
 	if autotest:
 		_run_autotest()
+
+# Visual AABB of a body in its own local space (union of its
+# MeshInstance3D AABBs) — the scale-honesty yardstick for the
+# assets1 contract: what you see vs the collision box, measured
+# the same way no matter how the visual is built.
+func _local_visual_aabb(body: Node3D) -> AABB:
+	var inv := body.global_transform.affine_inverse()
+	var out := AABB()
+	var first := true
+	var stack: Array = [body]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is MeshInstance3D:
+			var la: AABB = (inv * n.global_transform) * (n as MeshInstance3D).get_aabb()
+			if first:
+				out = la
+				first = false
+			else:
+				out = out.merge(la)
+		for ch in n.get_children():
+			stack.append(ch)
+	return out
 
 # Scene census shared by --countnodes and the autotest density
 # check: (total tree nodes, total MultiMesh instances).
@@ -294,6 +353,24 @@ func _take_markshot() -> void:
 	var path := "user://gate3d_markshot.png"
 	img.save_png(path)
 	print("MARKSHOT: ", ProjectSettings.globalize_path(path), " ", img.get_size())
+	get_tree().quit()
+
+# Assets Step 1: frame the first fleet car close — stand the
+# player off its front quarter and look at it, so the visual
+# check can pixel-test a textured GLB (not a grey fallback).
+func _take_carshot() -> void:
+	if not cars.is_empty():
+		var c := cars[0]
+		var off := Vector3(4.5, 0.2, 5.5)
+		player.global_position = c.global_position + off
+		player.look_at(Vector3(c.global_position.x, player.global_position.y, c.global_position.z), Vector3.UP)
+	for i in range(100):
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	var path := "user://gate3d_carshot.png"
+	img.save_png(path)
+	print("CARSHOT: ", ProjectSettings.globalize_path(path), " ", img.get_size())
 	get_tree().quit()
 
 # ---------- HUD ----------
@@ -1503,38 +1580,16 @@ func _run_autotest() -> void:
 	ecop.queue_free()
 	enemies.erase(ecop)
 
-	# (b) car variants: >= 3 silhouettes, palette >= 8 colours,
-	# wheels rotate proportional to speed (spin tracks speed / r)
-	var styles := {}
-	var car_colors_seen := {}
-	for c in cars:
-		var st: Variant = c.get("body_style")
-		if st != null:
-			styles[int(st)] = true
-		car_colors_seen[c.car_color] = true
-	if styles.size() < 3:
-		fails4.append("car_variants: %d distinct body_style values across spawned cars, expected >= 3" % styles.size())
-	var pal: Variant = cars[0].get("paint_colors")
-	if pal == null:
-		fails4.append("car_variants: cars expose no paint palette, expected >= 8 colours")
-	elif (pal as Array).size() < 8:
-		fails4.append("car_variants: paint palette has %d colours, expected >= 8" % (pal as Array).size())
-	if car_colors_seen.size() < 3:
-		fails4.append("car_variants: only %d distinct paint colours on spawned cars, expected >= 3" % car_colors_seen.size())
-	var wc: Car3D = cars[0]
-	wc.global_position = Vector3(-6, 0.2, 20)
-	wc.rotation.y = 0.0
-	wc.velocity = Vector3.ZERO
-	for i in range(3):
-		await get_tree().physics_frame
-	wc.speed = 12.0
-	var spin0: float = wc.spin_angle
-	for i in range(10):
-		await get_tree().physics_frame
-	var dspin: float = wc.spin_angle - spin0
-	if absf(dspin) < 2.0:
-		fails4.append("car_variants: wheel spin changed %.2f rad in 10 frames at speed 12, expected > 2.0 (speed/r)" % dspin)
-	wc.speed = 0.0
+	# (b) SUPERSEDED (Assets Step 1, 2026-11-01): the Detail 1
+	# car_variants checks (>= 3 procedural body_style values,
+	# paint palette >= 8, procedural wheel spin) asserted a
+	# procedural fleet that Vee's phased asset decision retired
+	# in favour of Kenney GLB models. The fleet contract —
+	# distinct models, scale honesty, wheel spin/steer, atlas —
+	# now lives in section 13 (assets1). This line keeps
+	# printing verbatim and asserts walk_cycle / signage /
+	# density_budget only. See the gate README's Assets Step 1
+	# section for the full supersession record.
 
 	# (c) signage + facade variance (registries live on CityBuilder)
 	var sign_count_v: Variant = city.get("sign_count")
@@ -1980,6 +2035,90 @@ func _run_autotest() -> void:
 			fails8.append("bonk: kill-plane fired during the on-foot bonk")
 	player.walk_speed = 5.0
 
+	# --- 13. Assets Step 1: Kenney fleet (ASSETS1_SPEC) ---
+	# The fleet contract that Detail 1's car_variants checks
+	# used to assert against procedural bodies, restated for
+	# GLB models: >= 5 distinct kit models in the live fleet,
+	# visual length honest against the 4.0 collision length at
+	# the x1.55 scale, the kit's own wheel nodes spin with
+	# speed and steer at the front, and the shared atlas is in
+	# the tree and actually on a car at runtime.
+	var fails9: Array[String] = []
+	var model_names := {}
+	for c in cars:
+		var mn: Variant = c.get("model_name")
+		if mn != null and str(mn) != "":
+			model_names[str(mn)] = true
+	if model_names.size() < 5:
+		fails9.append("kenney_fleet: %d distinct GLB models across the fleet, expected >= 5" % model_names.size())
+	for c in cars:
+		var va := _local_visual_aabb(c)
+		if absf(va.size.z - 4.0) > 0.7:
+			fails9.append("scale: car '%s' visual length %.2f, expected within 0.7 of the 4.0 collision length" % [str(c.get("model_name")), va.size.z])
+	# Probe note (test-design correction, found by the clean-dir
+	# export run): FileAccess checks the literal path, but an
+	# export stores an imported texture only as its .ctex + the
+	# .import remap — ResourceLoader.exists follows the remap
+	# and answers the actual contract ("the atlas resolves at
+	# this res:// path") in the project AND the packed binary.
+	if not ResourceLoader.exists("res://assets/kenney_car_kit/Textures/colormap.png"):
+		fails9.append("atlas: res://assets/kenney_car_kit/Textures/colormap.png does not resolve in the tree")
+	var textured := false
+	var mstack: Array = [cars[0]]
+	while not mstack.is_empty() and not textured:
+		var mn2: Node = mstack.pop_back()
+		if mn2 is MeshInstance3D:
+			var mi := mn2 as MeshInstance3D
+			var mat: Material = mi.get_surface_override_material(0)
+			if mat == null and mi.mesh != null:
+				mat = mi.mesh.surface_get_material(0)
+			if mat is StandardMaterial3D and (mat as StandardMaterial3D).albedo_texture != null:
+				textured = true
+		for ch in mn2.get_children():
+			mstack.append(ch)
+	if not textured:
+		fails9.append("atlas: no textured material found on the first fleet car at runtime")
+	var wc: Car3D = cars[1]
+	var gw: Variant = wc.get("glb_wheels")
+	if gw == null or (gw as Array).is_empty():
+		fails9.append("wheels_spin: fleet car exposes no GLB wheel nodes")
+	else:
+		wc.global_position = Vector3(-6, 0.2, 20)
+		wc.rotation.y = 0.0
+		wc.velocity = Vector3.ZERO
+		for i in range(3):
+			await get_tree().physics_frame
+		var wheels: Array = gw
+		var w0: Node3D = wheels[0]["node"]
+		wc.speed = 12.0
+		var wx0: float = w0.rotation.x
+		for i in range(10):
+			await get_tree().physics_frame
+		var dwx: float = w0.rotation.x - wx0
+		if absf(dwx) < 2.0:
+			fails9.append("wheels_spin: GLB wheel rotation.x changed %.2f rad in 10 frames at speed 12, expected > 2.0 (speed/r)" % dwx)
+		wc.speed = 0.0
+		# steering: drive_override is the Car3D test seam (the
+		# Player3D move_override pattern); steer only, no throttle
+		wc.driven = true
+		wc.set("drive_override", Vector2(1, 0))
+		for i in range(20):
+			await get_tree().physics_frame
+		wc.set("drive_override", Vector2(NAN, NAN))
+		wc.driven = false
+		var front_yaw := 0.0
+		var rear_yaw := 0.0
+		for went in wheels:
+			var wn: Node3D = went["node"]
+			if bool(went["front"]):
+				front_yaw = maxf(front_yaw, absf(wn.rotation.y))
+			else:
+				rear_yaw = maxf(rear_yaw, absf(wn.rotation.y))
+		if front_yaw < 0.25:
+			fails9.append("wheels_spin: front GLB wheels yawed %.2f rad under steering, expected > 0.25" % front_yaw)
+		if rear_yaw > 0.05:
+			fails9.append("wheels_spin: rear GLB wheels yawed %.2f rad under steering, expected ~0" % rear_yaw)
+
 	# --- BUSTED wiring (moved from section 10): player death
 	# starts a 2.5 s scene-reload timer, so this runs dead last;
 	# sections 11-12 need real physics time and cannot live
@@ -2040,4 +2179,9 @@ func _run_autotest() -> void:
 	else:
 		for f in fails8:
 			print("AUTOTEST FAIL: ", f)
-	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() and fails6.is_empty() and fails7.is_empty() and fails8.is_empty() else 1)
+	if fails9.is_empty():
+		print("AUTOTEST PASS: assets1 kenney_fleet scale wheels_spin atlas")
+	else:
+		for f in fails9:
+			print("AUTOTEST FAIL: ", f)
+	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() and fails6.is_empty() and fails7.is_empty() and fails8.is_empty() and fails9.is_empty() else 1)
