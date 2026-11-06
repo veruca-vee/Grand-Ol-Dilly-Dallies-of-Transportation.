@@ -450,10 +450,13 @@ and an actual simulator"
   the clean-dir proof — and it waits on the suite being confirmed
   green at 4.7.2 at all. A never-verified suite in CI is just a
   permanently red badge.
-- **Verified:** the workflow YAML parses (triggers push +
-  pull_request, 4 steps), and the exact command sequence runs green
-  from the repo root on Python 3.13.18. Run evidence recorded in
-  `design/DATA_PARITY_PLAN.md`.
+- **Verified on the real surface:** run `42192445239`, the first
+  Actions run this repo has ever had, conclusion **success** in 4
+  seconds (09:05:59Z -> 09:06:03Z). The runner printed
+  `Python 3.14.4`, `DATA PARITY PASS: enemies_world_wanted upgrades
+  weapons` and `PARSER SELFTEST PASS: planted_exact clean_zero
+  marker_nearest_frame grouped_anomalies`; every step green. Logs
+  quoted in `design/DATA_PARITY_PLAN.md`.
 - **Not proved by a planted failure:** that a non-zero exit turns the
   job red rests on GitHub's documented exit-code contract plus the
   mutation proof already recorded for the parity test itself — not on

@@ -156,3 +156,28 @@ So no autotest, no smoketest, no export, no Xvfb frame this session.
 `design/DATA_PARITY_SPEC.md` statement 5 is verified only on the
 Python side. Honest status: **the Godot checks are untested at
 4.7.2 on this machine, not passing and not failing.**
+
+## CI run evidence (2026-11-06, the first workflow run in this repo)
+
+`.github/workflows/checks.yml`, pushed on `claude/funny-knuth-0pwnqr`
+at `11b9921`. Run `42192445239`, `engine-free checks`,
+**conclusion: success**, 09:05:59Z → 09:06:03Z (4 seconds).
+
+Logs, the lines that matter:
+
+```
+Python 3.14.4
+DATA PARITY PASS: enemies_world_wanted upgrades weapons
+PARSER SELFTEST PASS: planted_exact clean_zero marker_nearest_frame grouped_anomalies
+```
+
+Every step `success`: checkout, python version, both checks. The
+runner gives 3.14.4; both scripts need 3.9+ (`str.removesuffix`), so
+the floor is comfortable and the version is printed each run rather
+than assumed.
+
+**Not proved here:** that a non-zero exit turns the job red. That
+rests on GitHub's documented exit-code contract plus the mutation
+proof recorded above for the parity test itself, not on a
+deliberately broken push. It is one commit to prove properly if Vee
+wants it in the record.
