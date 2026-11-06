@@ -65,6 +65,10 @@ and an actual simulator"
 - **Player character:** ______ (HTML is an unnamed green circle)
 - **Platform target:** ______ (HTML ran mobile + desktop; engine export
   target not yet stated)
+- **One data dir or two:** ______ (the numbers sit in both `data/` and
+  `engine/data/`; parity is now enforced by a test, but whether the
+  published mirror should exist at all is Vee's layout call — raised
+  2026-11-06, not decided)
 
 ## Gate 3D-0 status (2026-10-29, verified)
 
@@ -396,6 +400,43 @@ and an actual simulator"
   `builds/GODOT-Linux-Assets1.zip`. The look on
   iwantitnow is **[unverified]** until Vee sees it.
   **Step 2 (city kits) is next.**
+
+## Data parity fix status (2026-11-06, built + verified in Python; engine NOT re-run)
+
+- **Not a Vee request — a defect found in the tree** while standing
+  up a build environment on a fresh machine. Spec
+  `design/DATA_PARITY_SPEC.md`, plan `design/DATA_PARITY_PLAN.md`.
+- **The numbers had drifted.** `engine/data/*.json` is what the game
+  and the simulator read (`res://data/...`); `data/*.json` is the
+  published mirror README points at. The wanted pacing fix (`f3258ca`)
+  and the fall fix (`e537abd`) wrote `wanted.gains`,
+  `wanted.decay_step` and the whole `edge` block into the runtime copy
+  only. `git log -- data/` had one entry, the initial scaffold.
+  Nine leaf values apart, for five days.
+- **Why it mattered:** the engine's own fallbacks for two of those
+  keys are the pre-fix HTML values — `wanted.gd:32` falls back to
+  `decay_step 1.0` (a whole star, 4x Vee's 0.25) and
+  `gate3d_main.gd:824` to `kill_ped 0.15` (the exact ped-chain pacing
+  bug f3258ca fixed). A stale mirror that README calls canonical is a
+  loaded gun, not a cosmetic nit.
+- **Fix (TDD, red first — 9 FAILs recorded, exit 1):**
+  `tools/data_parity_test.py`, pure Python, no engine needed — it
+  compares every leaf in both dirs, exempts `_`-prefixed
+  documentation keys, and names the offending key in the FAIL line.
+  Then `engine/data/enemies_world_wanted.json` was copied over the
+  published twin. New line `DATA PARITY PASS: enemies_world_wanted
+  upgrades weapons`, exit 0. Mutation-proved after green (planted
+  `weapons[0].dmg = 999`, caught by name, restored).
+  `PARSER SELFTEST PASS` line verbatim.
+- **The rule, now in writing:** the runtime copy wins; tune
+  `engine/data/`, then sync out. In README, in SKELETON, and in the
+  test's own docstring so the FAIL explains itself.
+- **[Unverified]:** the 9 Godot AUTOTEST lines were NOT re-run — this
+  session's sandbox refused to execute the engine binary against the
+  project (`--version` works, `--import` denied). The change touches
+  no `.gd` file and nothing under `res://`, so it cannot affect them
+  in principle; that is an argument, not a measurement, and the
+  re-run is filed as an issue.
 
 ## Gate 0 status (2026-10-29, verified)
 

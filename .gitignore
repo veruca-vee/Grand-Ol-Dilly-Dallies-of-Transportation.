@@ -12,3 +12,7 @@ exports/
 .DS_Store
 Thumbs.db
 *.tmp
+
+# Python bytecode (tools/)
+__pycache__/
+*.pyc

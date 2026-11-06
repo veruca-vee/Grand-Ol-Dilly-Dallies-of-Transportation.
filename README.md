@@ -14,7 +14,11 @@ not modern AAA.
   the dated pivot from GTA 1 top-down → PS2-era 3D
 - `data/` — every gameplay number, copied from the original HTML
   version: weapons, upgrades, enemies, world, wanted, combo, economy.
-  These carry over to the 3D build unchanged.
+  **This is the published mirror.** The copy the engine and the
+  simulator actually read is `engine/data/` (`res://data/...`), and
+  that one wins: tune there, then sync out. `python3
+  tools/data_parity_test.py` enforces it — it drifted silently for
+  five days (fixed 2026-11-06, see `design/DATA_PARITY_SPEC.md`).
 - `design/ENGINE.md` — why Godot
 - `sim/SIMULATOR.md` + `engine/sim/simulator.gd` — headless balance
   simulator, runs on the same data files (verified passing)
