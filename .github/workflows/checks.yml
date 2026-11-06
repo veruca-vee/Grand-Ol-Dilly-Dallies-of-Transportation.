@@ -1,0 +1,45 @@
+# Engine-free checks — the ones that need no Godot, no GPU, no display.
+#
+# Why this exists: the data drift fixed in 7e492ba survived five days and
+# two commits because every check in this repo ran only when a human
+# remembered to run it. Both scripts below are pure Python 3 stdlib, so
+# they cost seconds on a bare runner.
+#
+# What is deliberately NOT here: the Godot autotest. It needs the 4.7.2
+# binary (~146 MB), an --import pass, and export templates for the
+# clean-dir proof. It waits until someone has confirmed the suite is
+# actually green at 4.7.2 (issue #1) — putting a never-verified suite in
+# CI just ships a permanently red badge.
+#
+# Convention: each script prints one "NAME PASS: <subchecks>" line and
+# exits 0, or FAIL lines and exits non-zero. Same shape as the AUTOTEST
+# lines in the Godot build, so a red job reads like the rest of the repo.
+
+name: checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  engine-free:
+    name: engine-free checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both scripts need 3.9+ (str.removesuffix). Printed, not assumed.
+      - name: Python version on the runner
+        run: python3 --version
+
+      # data/ is the published mirror, engine/data/ is what res:// reads.
+      # They drifted silently once; this is the guard.
+      - name: Data parity
+        run: python3 tools/data_parity_test.py
+
+      # The telemetry digest parser Vee's playtest sessions go through.
+      - name: Playtest parser selftest
+        run: python3 tools/playtest_selftest.py

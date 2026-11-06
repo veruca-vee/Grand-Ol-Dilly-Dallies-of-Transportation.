@@ -19,6 +19,10 @@ not modern AAA.
   that one wins: tune there, then sync out. `python3
   tools/data_parity_test.py` enforces it — it drifted silently for
   five days (fixed 2026-11-06, see `design/DATA_PARITY_SPEC.md`).
+- `.github/workflows/checks.yml` — the engine-free checks (data
+  parity + telemetry parser selftest) on every push. Pure Python,
+  seconds; the Godot autotest is deliberately NOT in CI until the
+  suite is confirmed green at 4.7.2
 - `design/ENGINE.md` — why Godot
 - `sim/SIMULATOR.md` + `engine/sim/simulator.gd` — headless balance
   simulator, runs on the same data files (verified passing)

@@ -438,6 +438,27 @@ and an actual simulator"
   in principle; that is an argument, not a measurement, and the
   re-run is filed as an issue.
 
+## CI status (2026-11-06, engine-free checks only)
+
+- **Why:** the data drift above survived five days because every
+  check ran only when a human remembered to. `.github/workflows/checks.yml`
+  runs the two pure-Python checks on every push and pull request:
+  `tools/data_parity_test.py` and `tools/playtest_selftest.py`.
+  First CI in the repo (`actions/runs` total was 0 before this).
+- **Deliberately not in CI:** the Godot autotest. It needs the
+  146 MB 4.7.2 binary, an `--import` pass, and export templates for
+  the clean-dir proof — and it waits on the suite being confirmed
+  green at 4.7.2 at all. A never-verified suite in CI is just a
+  permanently red badge.
+- **Verified:** the workflow YAML parses (triggers push +
+  pull_request, 4 steps), and the exact command sequence runs green
+  from the repo root on Python 3.13.18. Run evidence recorded in
+  `design/DATA_PARITY_PLAN.md`.
+- **Not proved by a planted failure:** that a non-zero exit turns the
+  job red rests on GitHub's documented exit-code contract plus the
+  mutation proof already recorded for the parity test itself — not on
+  a deliberately broken push. Say the word and that's one commit.
+
 ## Gate 0 status (2026-10-29, verified)
 
 - Built in `engine/` (Godot 4.3): main/city/player/car/ped/enemy/bullet/
