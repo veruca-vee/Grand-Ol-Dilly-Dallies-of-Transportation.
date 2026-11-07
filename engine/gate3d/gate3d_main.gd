@@ -214,7 +214,9 @@ func _ready() -> void:
 	# Assets Step 1: the fleet is Kenney Car Kit models now
 	# (ASSETS1_SPEC statement 1) — six distinct GLBs over the
 	# six spots, deterministic like the Detail 1 spread was.
-	var car_models := ["sedan", "hatchback-sports", "taxi", "van", "truck", "sedan-sports"]
+	# GETAWAY1 (2026-11-07): spot 0 is the Kimi getaway sedan
+	# (GETAWAY1_SPEC S1); the other five spots stay Kenney.
+	var car_models := ["getaway_sedan", "hatchback-sports", "taxi", "van", "truck", "sedan-sports"]
 	for i in range(car_spots.size()):
 		var car := Car3D.new()
 		car.model_name = car_models[i]
@@ -2064,7 +2066,14 @@ func _run_autotest() -> void:
 	if not ResourceLoader.exists("res://assets/kenney_car_kit/Textures/colormap.png"):
 		fails9.append("atlas: res://assets/kenney_car_kit/Textures/colormap.png does not resolve in the tree")
 	var textured := false
-	var mstack: Array = [cars[0]]
+	# GETAWAY1 test-design correction (labelled, same shape as
+	# the assets1 probe correction above): the contract is "the
+	# atlas is on a fleet car at runtime"; spot 0 is now the
+	# untextured Kimi sedan, so the probe walks the whole fleet
+	# instead of only the first car.
+	var mstack: Array = []
+	for c0 in cars:
+		mstack.append(c0)
 	while not mstack.is_empty() and not textured:
 		var mn2: Node = mstack.pop_back()
 		if mn2 is MeshInstance3D:
@@ -2077,7 +2086,7 @@ func _run_autotest() -> void:
 		for ch in mn2.get_children():
 			mstack.append(ch)
 	if not textured:
-		fails9.append("atlas: no textured material found on the first fleet car at runtime")
+		fails9.append("atlas: no textured material found on any fleet car at runtime")
 	var wc: Car3D = cars[1]
 	var gw: Variant = wc.get("glb_wheels")
 	if gw == null or (gw as Array).is_empty():
@@ -2118,6 +2127,81 @@ func _run_autotest() -> void:
 			fails9.append("wheels_spin: front GLB wheels yawed %.2f rad under steering, expected > 0.25" % front_yaw)
 		if rear_yaw > 0.05:
 			fails9.append("wheels_spin: rear GLB wheels yawed %.2f rad under steering, expected ~0" % rear_yaw)
+
+	# --- 14. Getaway 1: Kimi sedan (GETAWAY1_SPEC) ---
+	# The hero car: fleet spot 0 is the Kimi 3D Make getaway
+	# sedan — probed scale honest against the unchanged 4.0
+	# collision length, nose already -Z (no flip), its four
+	# named wheel nodes spin on their axle and steer at the
+	# front. Statements S1-S5 in design/GETAWAY1_SPEC.md.
+	var fails10: Array[String] = []
+	var hero: Car3D = cars[0]
+	if str(hero.get("model_name")) != "getaway_sedan":
+		fails10.append("kimi_sedan: fleet spot 0 is '%s', expected the getaway sedan" % str(hero.get("model_name")))
+	if not ResourceLoader.exists("res://assets/kimi_getaway/Felony_City_Getaway_Sedan.glb"):
+		fails10.append("kimi_sedan: res://assets/kimi_getaway/Felony_City_Getaway_Sedan.glb does not resolve in the tree")
+	var hva := _local_visual_aabb(hero)
+	if absf(hva.size.z - 4.0) > 0.7:
+		fails10.append("scale: getaway sedan visual length %.2f, expected within 0.7 of the 4.0 collision length" % hva.size.z)
+	if absf(hva.size.x - 1.8) > 0.3:
+		fails10.append("scale: getaway sedan visual width %.2f, expected within 0.3 of the 1.8 collision width" % hva.size.x)
+	var hw: Variant = hero.get("glb_wheels")
+	if hw == null or (hw as Array).size() != 4:
+		fails10.append("wheels_spin: getaway sedan exposes %d wheel nodes, expected 4" % (0 if hw == null else (hw as Array).size()))
+	else:
+		var hwheels: Array = hw
+		# Orientation (S3): the wheels flagged front must sit at
+		# the car's -Z end in car-local space — the sedan's nose
+		# (headlights/hood end) is its forward.
+		for went in hwheels:
+			var wn2: Node3D = went["node"]
+			var local_p: Vector3 = hero.global_transform.affine_inverse() * wn2.global_position
+			if bool(went["front"]) and local_p.z > -0.8:
+				fails10.append("orientation: wheel '%s' flagged front but sits at car-local z %.2f (expected < -0.8)" % [wn2.name, local_p.z])
+			if not bool(went["front"]) and local_p.z < 0.8:
+				fails10.append("orientation: wheel '%s' flagged rear but sits at car-local z %.2f (expected > 0.8)" % [wn2.name, local_p.z])
+		# Spin (S4): roll the hero and accumulate a front wheel's
+		# per-frame basis rotation (per-frame steps stay < PI,
+		# so quaternion angles don't wrap).
+		hero.global_position = Vector3(-12, 0.2, 30)
+		hero.rotation.y = 0.0
+		hero.velocity = Vector3.ZERO
+		for i in range(3):
+			await get_tree().physics_frame
+		var wf: Node3D = null
+		var wr: Node3D = null
+		for went in hwheels:
+			if bool(went["front"]) and wf == null:
+				wf = went["node"]
+			if not bool(went["front"]) and wr == null:
+				wr = went["node"]
+		hero.speed = 12.0
+		var prev_q := wf.global_transform.basis.get_rotation_quaternion()
+		var spun := 0.0
+		for i in range(10):
+			await get_tree().physics_frame
+			var q := wf.global_transform.basis.get_rotation_quaternion()
+			spun += prev_q.angle_to(q)
+			prev_q = q
+		hero.speed = 0.0
+		if spun < 2.0:
+			fails10.append("wheels_spin: getaway front wheel accumulated %.2f rad in 10 frames at speed 12, expected > 2.0 (speed/r)" % spun)
+		# Steer (S4): front wheel axles tilt under steering,
+		# rear axles stay put. Axle = the wheel basis's Z axis
+		# expressed in car-local space.
+		hero.driven = true
+		hero.set("drive_override", Vector2(1, 0))
+		for i in range(20):
+			await get_tree().physics_frame
+		hero.set("drive_override", Vector2(NAN, NAN))
+		hero.driven = false
+		var inv_b := hero.global_transform.basis.inverse()
+		var axle_f := (inv_b * (wf.global_transform.basis * Vector3(0, 0, 1))).normalized()
+		var axle_r := (inv_b * (wr.global_transform.basis * Vector3(0, 0, 1))).normalized()
+		if absf(axle_f.z) < 0.15:
+			fails10.append("wheels_spin: getaway front axle tilt %.2f under steering, expected > 0.15" % absf(axle_f.z))
+		if absf(axle_r.z) > 0.05:
+			fails10.append("wheels_spin: getaway rear axle tilt %.2f under steering, expected ~0" % absf(axle_r.z))
 
 	# --- BUSTED wiring (moved from section 10): player death
 	# starts a 2.5 s scene-reload timer, so this runs dead last;
@@ -2184,4 +2268,9 @@ func _run_autotest() -> void:
 	else:
 		for f in fails9:
 			print("AUTOTEST FAIL: ", f)
-	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() and fails6.is_empty() and fails7.is_empty() and fails8.is_empty() and fails9.is_empty() else 1)
+	if fails10.is_empty():
+		print("AUTOTEST PASS: getaway1 kimi_sedan scale orientation wheels_spin")
+	else:
+		for f in fails10:
+			print("AUTOTEST FAIL: ", f)
+	get_tree().quit(0 if fails.is_empty() and fails2.is_empty() and fails3.is_empty() and fails4.is_empty() and fails5.is_empty() and fails6.is_empty() and fails7.is_empty() and fails8.is_empty() and fails9.is_empty() and fails10.is_empty() else 1)

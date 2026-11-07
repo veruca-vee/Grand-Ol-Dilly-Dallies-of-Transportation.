@@ -14,12 +14,36 @@ extends CharacterBody3D
 # seam); _ready builds that model.
 var model_name: String = "sedan"
 const MODEL_DIR := "res://assets/kenney_car_kit/"
-# Research measurement (ASSET_RESEARCH §2): the kit sedan is
-# 2.55 long against our 4.0 collision length -> x1.55.
+# Per-model build config (GETAWAY1: the fleet is no longer
+# Kenney-only). Fields: file, scale (visual -> the unchanged
+# 4.0 collision length), flip (kit nose is +Z, physics forward
+# is -Z; the Kimi sedan's nose is already -Z), spin_r (the
+# effective wheel radius at scale — the honest divisor for
+# spin, angle = distance / r), wheel_mode ("kit": wheel nodes
+# named wheel-front-*/wheel-back-* driven by euler writes;
+# "axle": Wheel_FL/FR/RL/RR nodes whose baked rotY basis is
+# composed with yaw + axle spin instead).
+# Kenney values are the pre-GETAWAY1 constants, unchanged:
+# kit sedan 2.55 long -> x1.55 (ASSET_RESEARCH §2); kit wheel
+# radius 0.30 native x 1.55 = 0.465.
+const MODEL_CFG := {
+	"getaway_sedan": {
+		"file": "res://assets/kimi_getaway/Felony_City_Getaway_Sedan.glb",
+		"scale": 0.8406, "flip": false, "spin_r": 0.3362,
+		"wheel_mode": "axle",
+	},
+}
+# The kit scale as a public constant: gate3d_main's service-
+# vehicle dressing scales kit GLBs by it directly.
 const MODEL_SCALE := 1.55
-# Kit wheel radius (0.30 native) at MODEL_SCALE: the honest
-# divisor for spin (angle = distance / r).
-const WHEEL_R := 0.465
+const KIT_CFG := {"scale": MODEL_SCALE, "flip": true, "spin_r": 0.465, "wheel_mode": "kit"}
+
+func _cfg() -> Dictionary:
+	if MODEL_CFG.has(model_name):
+		return MODEL_CFG[model_name]
+	var c := KIT_CFG.duplicate()
+	c["file"] = MODEL_DIR + model_name + ".glb"
+	return c
 
 var speed: float = 0.0
 var max_speed: float = 24.0
@@ -81,26 +105,34 @@ func _ready() -> void:
 	add_child(shape)
 	_build_model()
 
-# Instance the kit model and wire its parts. The kit's nose
-# is +Z (probe, ASSETS1 gate: wheel-front-* sit at positive
-# Z in Godot space); this car's forward is -Z, so the model
-# root turns PI to face the way the physics drives. Wheel
-# centres sit at native y 0.30 with radius 0.30, so at
-# MODEL_SCALE the tyres touch y=0 exactly at the car origin.
+# Instance the model and wire its parts, per _cfg(). Kit
+# models: nose is +Z (probe, ASSETS1 gate: wheel-front-* sit
+# at positive Z in Godot space) while this car's forward is
+# -Z, so the model root turns PI; wheel centres sit at native
+# y 0.30 with radius 0.30, so at the kit scale the tyres touch
+# y=0 exactly at the car origin. The getaway sedan needs no
+# flip (nose already -Z, GETAWAY1 probe) and its wheel nodes
+# carry a baked rotY basis, stored as "home" for the axle-mode
+# composition in _physics_process.
 func _build_model() -> void:
-	var ps: PackedScene = load(MODEL_DIR + model_name + ".glb")
+	var cfg := _cfg()
+	var ps: PackedScene = load(str(cfg["file"]))
 	if ps == null:
 		return
 	model_root = ps.instantiate() as Node3D
-	model_root.scale = Vector3.ONE * MODEL_SCALE
-	model_root.rotation.y = PI
+	model_root.scale = Vector3.ONE * float(cfg["scale"])
+	if bool(cfg["flip"]):
+		model_root.rotation.y = PI
 	add_child(model_root)
+	var axle := str(cfg["wheel_mode"]) == "axle"
 	var stack: Array = [model_root]
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()
 		if n is MeshInstance3D:
 			var lname := n.name.to_lower()
-			if lname.begins_with("wheel-front-") or lname.begins_with("wheel-back-"):
+			if axle and (lname == "wheel_fl" or lname == "wheel_fr" or lname == "wheel_rl" or lname == "wheel_rr"):
+				glb_wheels.append({"node": n, "front": lname == "wheel_fl" or lname == "wheel_fr", "home": (n as Node3D).transform.basis})
+			elif not axle and (lname.begins_with("wheel-front-") or lname.begins_with("wheel-back-")):
 				glb_wheels.append({"node": n, "front": lname.begins_with("wheel-front-")})
 			else:
 				body_meshes.append(n)
@@ -147,16 +179,28 @@ func _physics_process(delta: float) -> void:
 		speed = move_toward(speed, 0.0, 20.0 * delta)
 		steer_visual = move_toward(steer_visual, 0.0, delta * 3.0)
 	if abs(speed) > 0.01:
-		spin_angle -= speed * delta / WHEEL_R
-	# The model root is turned PI, so a wheel's local rotation.x
-	# runs against the car's frame: -spin_angle is what rolls
-	# the tyre the way the car travels (probe + axis math in
-	# the gate README). Yaw keeps steer_visual's sign — about
-	# the shared Y axis the flip adds PI, it does not negate.
+		spin_angle -= speed * delta / float(_cfg()["spin_r"])
+	# Kit wheels: the model root is turned PI, so a wheel's
+	# local rotation.x runs against the car's frame:
+	# -spin_angle is what rolls the tyre the way the car
+	# travels (probe + axis math in the gate README). Yaw keeps
+	# steer_visual's sign — about the shared Y axis the flip
+	# adds PI, it does not negate.
+	# Axle wheels (getaway sedan): the node's baked basis is
+	# composed as yaw * home * axle-spin. The tyre disc lies in
+	# the node's local XY plane with its axle along local Z,
+	# so spinning about local Z rolls it; home maps that axle
+	# onto the car's lateral axis, and the front pair's yaw is
+	# applied in car space first. Spin direction matches the
+	# kit path by construction (GETAWAY1_SPEC S4).
 	for went in glb_wheels:
 		var wn: Node3D = went["node"]
-		wn.rotation.x = -spin_angle
-		wn.rotation.y = steer_visual if bool(went["front"]) else 0.0
+		if went.has("home"):
+			var yaw := steer_visual if bool(went["front"]) else 0.0
+			wn.basis = Basis(Vector3.UP, yaw) * (went["home"] as Basis) * Basis(Vector3(0, 0, 1), spin_angle)
+		else:
+			wn.rotation.x = -spin_angle
+			wn.rotation.y = steer_visual if bool(went["front"]) else 0.0
 	var forward := -global_transform.basis.z
 	velocity.x = forward.x * speed
 	velocity.z = forward.z * speed

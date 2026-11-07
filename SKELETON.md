@@ -437,6 +437,39 @@ and an actual simulator"
   no `.gd` file and nothing under `res://`, so it cannot affect them
   in principle; that is an argument, not a measurement, and the
   re-run is filed as an issue.
+  [Closed since: H•E•X•E re-ran the full 4.7.2 suite on that
+  branch before it merged — 9/9 plus export/clean-dir/Xvfb
+  proofs, 2026-11-06.]
+
+## Getaway 1 status (2026-11-07, built + verified headless/Xvfb/clean-dir export)
+
+- **Kimi's car is in the game.** The getaway sedan (Kimi 3D
+  Make, Vee-approved preview 2026-11-07) is fleet spot 0, the
+  car beside player spawn. Spec/plan: `design/GETAWAY1_SPEC.md`,
+  `design/GETAWAY1_PLAN.md`; provenance in
+  `engine/assets/kimi_getaway/PROVENANCE.md`.
+- **Probed, not trusted:** intake measured the GLB itself —
+  2,392 tris, 14 flat materials, world AABB 2.092 x 1.513 x
+  4.759 m (delivery note said 4.80; measured wins), nose -Z
+  proven three ways from the file, four separate wheel nodes
+  (Wheel_FL/FR/RL/RR, radius 0.40 native), tyres at y=0.
+- **Integration shape:** Car3D now has a per-model config
+  (file, scale, flip, spin radius, wheel mode); Kenney entries
+  carry the exact old constants. The sedan scales DOWN x0.8406
+  to the unchanged 4.0 collision length, no nose flip, and its
+  wheels compose yaw * home-basis * axle-spin (its wheel bases
+  are baked rotY, so the kit's euler writes don't apply).
+- **Contract:** new autotest section 14 —
+  `AUTOTEST PASS: getaway1 kimi_sedan scale orientation wheels_spin`.
+  All 9 prior lines verbatim; section 13's atlas probe now
+  walks the whole fleet (labelled correction: spot 0 is
+  untextured now). Full suite at 4.7.2: import 0 errors,
+  smoketest 5/5, autotest 10/10, 1200 frames clean, data
+  hashes unchanged, parity + parser tests PASS.
+- **Export:** clean-dir binary alone prints 10/10; Xvfb
+  `--carshot` frames the dark sedan at its spot (6,889 unique
+  colours). The look on real hardware is **[unverified]**
+  until Vee plays it.
 
 ## Gate 0 status (2026-10-29, verified)
 
