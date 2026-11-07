@@ -93,4 +93,11 @@ green; fetch/pull back and verify local == remote by hash +
 connector content spot-check (spec files + project state; the
 GLB itself rides real git).
 ### Record
-(pending)
+Shipped 2026-11-07: commit 3265dae81b79b0e643e68a1569e36e9144fe895a
+on getaway1-kimi-sedan, pushed (local == remote), pre-FF guard
+main still 7e492ba, fast-forward main 7e492ba -> 3265dae,
+fetch/pull back local main == origin/main == ls-remote ==
+3265dae, tree clean. Connector spot-check: GETAWAY1_SPEC.md
+blob 4377800d == local; PROVENANCE.md present on main; in-repo
+GLB sha256 fae37011... matches intake. (Post-ship doc edit: this
+record itself rides a follow-up commit.)
