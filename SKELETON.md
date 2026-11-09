@@ -461,6 +461,12 @@ and an actual simulator"
   the parser selftest. The guard was not dropped — the failure mode
   it guarded was deleted. Said plainly here and in the workflow
   header so a one-step CI does not read as neglect.
+  Verified green after the deletion: run `42662729752`, conclusion
+  **success**, `Python 3.14.4` + `PARSER SELFTEST PASS: planted_exact
+  clean_zero marker_nearest_frame grouped_anomalies`, every step
+  green. The stale step was proved stale first — the retired test's
+  path exits 2 (`can't open file`), so leaving it in would have
+  reddened the job on a missing file rather than a real failure.
 - **Deliberately not in CI:** the Godot autotest. It needs the
   146 MB 4.7.2 binary, an `--import` pass, and export templates for
   the clean-dir proof — and it waits on the suite being confirmed
