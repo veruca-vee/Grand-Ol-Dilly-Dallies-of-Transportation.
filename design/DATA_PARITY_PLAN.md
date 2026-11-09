@@ -1,5 +1,12 @@
 # DATA PARITY — PLAN + TASKS
 
+> **SUPERSEDED 2026-11-09** — see the banner on
+> `design/DATA_PARITY_SPEC.md`. The sync this plan performed stands (it
+> is what made the two copies agree before one was removed); the test it
+> built is retired, and the CI run evidence at the bottom describes a
+> two-step workflow that is now one step. Numbers and outputs left
+> exactly as recorded.
+
 Spec: `design/DATA_PARITY_SPEC.md`. Runs under `design/METHOD.md`
 (spec → plan → tasks → TDD red-first → validate).
 

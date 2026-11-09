@@ -1,5 +1,20 @@
 # DATA PARITY — SPEC: "one set of numbers, not two"
 
+> **SUPERSEDED 2026-11-09.** Vee was asked one-dir-or-two (issue #2) and
+> chose **one**: the repo-root `data/` mirror is deleted, `engine/data/`
+> is the only copy, and `tools/data_parity_test.py` is retired with it.
+> Statements 1-4 below describe a check on a duplication that no longer
+> exists. Statement 5 (nothing else regresses) held and still holds.
+>
+> Kept, not deleted, because the defect it documents is the reason the
+> duplication went — and because the fallback trap in "Why it is
+> load-bearing" is **still live code**: `engine/core/wanted.gd:32`
+> falls back to `decay_step 1.0` and
+> `engine/gate3d/gate3d_main.gd:824` to `kill_ped 0.15` if those keys
+> ever go missing from the one remaining file. One copy means nothing
+> can silently disagree with it; it does not mean the keys cannot be
+> deleted by hand.
+
 Status: found 2026-11-06 while standing up a build environment on a
 fresh machine. Not a feature request from Vee — a defect found in the
 tree, fixed under METHOD.md (TDD, red first). Recorded here because

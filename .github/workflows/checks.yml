@@ -1,9 +1,16 @@
 # Engine-free checks — the ones that need no Godot, no GPU, no display.
 #
-# Why this exists: the data drift fixed in 7e492ba survived five days and
+# Why this exists: a data drift (fixed in 7e492ba) survived five days and
 # two commits because every check in this repo ran only when a human
-# remembered to run it. Both scripts below are pure Python 3 stdlib, so
-# they cost seconds on a bare runner.
+# remembered to run it. The script below is pure Python 3 stdlib, so it
+# costs seconds on a bare runner.
+#
+# History, so the shrinking step list reads straight: this workflow also
+# ran tools/data_parity_test.py, which compared data/ against
+# engine/data/. Vee retired the duplicate on 2026-11-09 (option 2 on
+# issue #2) — one data dir now, engine/data/, so there is nothing left
+# to compare and the test went with it. The guard was not removed; the
+# failure mode was.
 #
 # What is deliberately NOT here: the Godot autotest. It needs the 4.7.2
 # binary (~146 MB), an --import pass, and export templates for the
@@ -31,14 +38,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Both scripts need 3.9+ (str.removesuffix). Printed, not assumed.
+      # Needs 3.9+ (str.removesuffix). Printed, not assumed.
       - name: Python version on the runner
         run: python3 --version
-
-      # data/ is the published mirror, engine/data/ is what res:// reads.
-      # They drifted silently once; this is the guard.
-      - name: Data parity
-        run: python3 tools/data_parity_test.py
 
       # The telemetry digest parser Vee's playtest sessions go through.
       - name: Playtest parser selftest

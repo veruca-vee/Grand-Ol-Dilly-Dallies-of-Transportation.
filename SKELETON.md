@@ -32,6 +32,11 @@ and an actual simulator"
 - **Source of truth for systems:** the two HTML versions Vee pasted
   2026-10-29 (multi-mode v2 + mobile-only v1). All numbers in `data/`
   are copied from that HTML, not invented.
+- **One data dir, not two:** Vee, 2026-11-09, asked which way to go on
+  the duplicated numbers and chose option 2 — "`engine/data/` only."
+  The repo-root `data/` mirror is deleted and the parity test retired
+  with it. `data/*.json` anywhere in these docs or in the `.gd` files
+  now means the one dir, `res://data/` = `engine/data/`.
 - **Asset pipeline [earlier proposal, not yet re-confirmed for this build]:**
   Vee, 2026-10-25: assets start as emojis, are "meticulously scaffolded"
   and filled with generated images, then saved. Continuity at asset
@@ -65,10 +70,6 @@ and an actual simulator"
 - **Player character:** ______ (HTML is an unnamed green circle)
 - **Platform target:** ______ (HTML ran mobile + desktop; engine export
   target not yet stated)
-- **One data dir or two:** ______ (the numbers sit in both `data/` and
-  `engine/data/`; parity is now enforced by a test, but whether the
-  published mirror should exist at all is Vee's layout call — raised
-  2026-11-06, not decided)
 
 ## Gate 3D-0 status (2026-10-29, verified)
 
@@ -403,6 +404,15 @@ and an actual simulator"
 
 ## Data parity fix status (2026-11-06, built + verified in Python; engine NOT re-run)
 
+> **SUPERSEDED 2026-11-09 by Vee's one-dir call** (above, and issue #2).
+> The mirror this section synced is now deleted and
+> `tools/data_parity_test.py` is retired — with one copy of the numbers
+> there is nothing to compare. Kept verbatim because the drift it
+> documents is real history: it is why the duplication went, and the
+> fallback trap it describes (`wanted.gd:32` -> `decay_step 1.0`,
+> `gate3d_main.gd:824` -> `kill_ped 0.15`) is still live code worth
+> knowing about.
+
 - **Not a Vee request — a defect found in the tree** while standing
   up a build environment on a fresh machine. Spec
   `design/DATA_PARITY_SPEC.md`, plan `design/DATA_PARITY_PLAN.md`.
@@ -441,10 +451,16 @@ and an actual simulator"
 ## CI status (2026-11-06, engine-free checks only)
 
 - **Why:** the data drift above survived five days because every
-  check ran only when a human remembered to. `.github/workflows/checks.yml`
-  runs the two pure-Python checks on every push and pull request:
-  `tools/data_parity_test.py` and `tools/playtest_selftest.py`.
-  First CI in the repo (`actions/runs` total was 0 before this).
+  check ran only when a human remembered to.
+  `.github/workflows/checks.yml` runs the pure-Python checks on every
+  push and pull request. First CI in the repo (`actions/runs` total
+  was 0 before this).
+- **Now one check, not two (2026-11-09):** it ran
+  `tools/data_parity_test.py` and `tools/playtest_selftest.py`; the
+  parity test retired with the mirror on Vee's one-dir call, leaving
+  the parser selftest. The guard was not dropped — the failure mode
+  it guarded was deleted. Said plainly here and in the workflow
+  header so a one-step CI does not read as neglect.
 - **Deliberately not in CI:** the Godot autotest. It needs the
   146 MB 4.7.2 binary, an `--import` pass, and export templates for
   the clean-dir proof — and it waits on the suite being confirmed

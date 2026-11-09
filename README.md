@@ -12,17 +12,17 @@ not modern AAA.
 
 - `SKELETON.md` — what's decided (in Vee's words), what's blank, and
   the dated pivot from GTA 1 top-down → PS2-era 3D
-- `data/` — every gameplay number, copied from the original HTML
-  version: weapons, upgrades, enemies, world, wanted, combo, economy.
-  **This is the published mirror.** The copy the engine and the
-  simulator actually read is `engine/data/` (`res://data/...`), and
-  that one wins: tune there, then sync out. `python3
-  tools/data_parity_test.py` enforces it — it drifted silently for
-  five days (fixed 2026-11-06, see `design/DATA_PARITY_SPEC.md`).
-- `.github/workflows/checks.yml` — the engine-free checks (data
-  parity + telemetry parser selftest) on every push. Pure Python,
-  seconds; the Godot autotest is deliberately NOT in CI until the
-  suite is confirmed green at 4.7.2
+- `engine/data/` — **every gameplay number, and the only copy.**
+  Weapons, upgrades, enemies, world, wanted, combo, economy, copied
+  from the original HTML version. This is `res://data/...`: what the
+  game reads and what the headless simulator reads. Tune here.
+  There used to be a second copy at the repo root; it drifted
+  silently for five days because nothing read it, and Vee retired it
+  2026-11-09 (`design/DATA_PARITY_SPEC.md` has the whole story).
+- `.github/workflows/checks.yml` — the engine-free check (telemetry
+  parser selftest) on every push. Pure Python, seconds; the Godot
+  autotest is deliberately NOT in CI until the suite is confirmed
+  green at 4.7.2
 - `design/ENGINE.md` — why Godot
 - `sim/SIMULATOR.md` + `engine/sim/simulator.gd` — headless balance
   simulator, runs on the same data files (verified passing)
